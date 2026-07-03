@@ -143,6 +143,11 @@ let STORE;
 try { STORE = JSON.parse(localStorage.getItem(STORE_KEY)) || null; } catch { STORE = null; }
 if (!STORE || !Array.isArray(STORE.users)) STORE = { users: [], sessionId: null };
 
+/* meta del templo: lista blanca de biblioteca + documentos asignados */
+STORE.meta = STORE.meta || {};
+STORE.meta.customDocs = STORE.meta.customDocs || [];
+if (!STORE.meta.libAccess) STORE.meta.libAccess = {};
+
 const persist = () => localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
 const currentUser = () => STORE.users.find(u => u.id === STORE.sessionId) || null;
 const getUser = id => STORE.users.find(u => u.id === id);
@@ -159,6 +164,16 @@ function assignTargets(u) {
   if (u.role === 'vig2') return STORE.users.filter(x => x.role === 'aprendiz' && x.status === 'active');
   return [];
 }
+const canMonitor = u => canSeeAll(u) || (u && u.status === 'active' && (u.role === 'vig1' || u.role === 'vig2'));
+const canGradeRole = (me, subRole) => canSeeAll(me) || (me.role === 'vig1' && subRole === 'companero') || (me.role === 'vig2' && subRole === 'aprendiz');
+
+/* lista blanca: qué roles ven cada sección de la biblioteca (GADU y V∴M∴ siempre ven todo) */
+function sectionRoles(sec) {
+  const saved = STORE.meta.libAccess[sec.roman];
+  if (Array.isArray(saved)) return saved;
+  return Object.keys(ROLES).filter(k => ROLES[k].rank < 5 && ROLES[k].rank >= sec.minRank);
+}
+const sectionVisibleTo = (sec, u) => canSeeAll(u) || sectionRoles(sec).includes(u.role);
 
 function blankData(name) {
   const t = today();
@@ -365,12 +380,13 @@ function newTask(title, extra = {}) {
 }
 
 /* ═══════════ RENDER RAÍZ ═══════════ */
-const VIEW_NAMES = { dashboard:'Tablero', notes:'Notas', tasks:'Tareas', calendar:'Calendario', library:'Biblioteca', admin:'Administración' };
+const VIEW_NAMES = { dashboard:'Tablero', notes:'Notas', tasks:'Tareas', calendar:'Calendario', library:'Biblioteca', monitor:'Monitoreo', admin:'Administración' };
 const viewEl = $('#view');
 const authEl = $('#auth');
 
 function go(view) {
   if (view === 'admin' && !canSeeAll(currentUser())) { toast('Reservado al Or∴ de administración'); return; }
+  if (view === 'monitor' && !canMonitor(currentUser())) { toast('Reservado a los Vigilantes y al Or∴'); return; }
   UI.view = view;
   render();
 }
@@ -386,6 +402,8 @@ function render() {
   $('#crumb').textContent = VIEW_NAMES[UI.view];
   $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.nav === UI.view));
   $('#nav-admin').hidden = !canSeeAll(me);
+  $('#nav-monitor').hidden = !canMonitor(me);
+  $('#backup-tools').hidden = me.role !== 'gadu';
   $('#top-date').textContent = cap(new Intl.DateTimeFormat('es-ES', {weekday:'long', day:'numeric', month:'long', year:'numeric'}).format(new Date()));
   $('#drive-link').href = DRIVE_FOLDER;
 
@@ -546,8 +564,8 @@ function renderAuth() {
 
 /* ═══════════ VISTA: TABLERO ═══════════ */
 function visibleSections() {
-  const r = rankOf(currentUser());
-  return canSeeAll(currentUser()) ? LIBRARY.sections : LIBRARY.sections.filter(s => s.minRank <= r);
+  const me = currentUser();
+  return LIBRARY.sections.filter(s => sectionVisibleTo(s, me));
 }
 function visibleBooks() {
   return visibleSections().flatMap(s => s.books.map(b => ({...b, section: s})));
@@ -791,6 +809,7 @@ function taskCard(t) {
       ${t.subtasks.length ? `<span class="tc-sub">☰ ${subDone}/${t.subtasks.length}</span>` : ''}
       ${t.project ? `<span class="tc-proj">${esc(t.project)}</span>` : ''}
       ${t.assignedBy ? `<span class="tc-from" title="Trabajo encomendado">☩ de ${esc(userName(t.assignedBy))}</span>` : ''}
+      ${t.review ? (t.review.verdict === 'jp' ? '<span class="jp-badge">∴ J∴P∴</span>' : '<span class="jp-badge redo">↺ ajustes</span>') : ''}
     </div>` : ''}
   </div>`;
 }
@@ -805,6 +824,7 @@ VIEWS.tasks = () => {
   const toolbar = `
   <div class="tasks-toolbar">
     <button class="btn gold" data-action="new-task">+ Nueva tarea</button>
+    ${(!UI.viewAs && assignTargets(me).length) ? '<button class="btn" data-action="assign-work">☩ Asignar trabajo</button>' : ''}
     <div class="seg">
       <button class="${UI.taskView === 'kanban' ? 'on' : ''}" data-action="task-view" data-tv="kanban">Tablero</button>
       <button class="${UI.taskView === 'list' ? 'on' : ''}" data-action="task-view" data-tv="list">Lista</button>
@@ -1033,9 +1053,9 @@ const nextLibState = s => s === 'pendiente' ? 'leyendo' : s === 'leyendo' ? 'lei
 
 VIEWS.library = () => {
   const me = currentUser();
-  const myRank = rankOf(me);
   const seeAll = canSeeAll(me);
   const prog = libProgress();
+  const docs = STORE.meta.customDocs.filter(d => seeAll || d.addedBy === me.id || d.roles.includes(me.role));
   return `
   <div class="lib-hero">
     <p class="epigraph">Camino de estudio · Tradición masónica</p>
@@ -1048,7 +1068,7 @@ VIEWS.library = () => {
   </div>
 
   ${LIBRARY.sections.map(sec => {
-    const unlocked = seeAll || sec.minRank <= myRank;
+    const unlocked = sectionVisibleTo(sec, me);
     if (!unlocked) return `
     <section class="lib-section locked">
       <div class="lib-sec-head">
@@ -1086,6 +1106,31 @@ VIEWS.library = () => {
       </div>
     </section>`;
   }).join('')}
+
+  ${docs.length ? `
+  <section class="lib-section">
+    <div class="lib-sec-head">
+      <span class="lib-roman">☩</span>
+      <h2 class="lib-sec-title">Trabajos y materiales asignados</h2>
+    </div>
+    <p class="lib-sec-desc">Documentos de estudio entregados por los Vigilantes y el Or∴ de administración.</p>
+    <div class="book-grid">
+      ${docs.map(d => `
+      <article class="book">
+        <span class="b-author">Asignado por ${esc(userName(d.addedBy))} · ${fmtShort(d.created)}</span>
+        <h3 class="b-title">${d.url
+          ? `<a href="${esc(d.url)}" target="_blank" rel="noopener" title="Abrir el material">${esc(d.title)}<span class="ext"> ↗</span></a>`
+          : d.dataUrl
+            ? `<a href="${d.dataUrl}" download="${esc(d.fileName || 'material')}" title="Descargar el material">${esc(d.title)}<span class="ext"> ⇩</span></a>`
+            : esc(d.title)}</h3>
+        <p class="b-desc">${esc(d.desc) || '—'}</p>
+        <div class="b-foot">
+          ${(seeAll || d.addedBy === me.id) ? d.roles.map(r => `<span class="role-badge">${esc((ROLES[r] || {}).short || r)}</span>`).join('') : ''}
+          ${(me.role === 'gadu' || d.addedBy === me.id) ? `<button class="b-link" data-action="doc-del" data-id="${d.id}" style="background:none;border:none;cursor:pointer;margin-left:auto">✕ Retirar</button>` : ''}
+        </div>
+      </article>`).join('')}
+    </div>
+  </section>` : ''}
 
   <p class="side-motto" style="margin-top:3rem">∴ De lo general a lo particular; de la piedra bruta a la piedra pulida. ∴</p>`;
 };
@@ -1156,8 +1201,25 @@ VIEWS.admin = () => {
       </div>
     </section>
 
+    ${isGadu ? `
     <section class="panel">
-      <div class="panel-head"><span class="panel-title">▲ Respaldo del templo</span></div>
+      <div class="panel-head"><span class="panel-title">▤ Biblioteca — lista blanca por rol</span></div>
+      <div class="panel-body">
+        <p style="font-family:var(--font-serif);font-style:italic;color:var(--muted);margin-bottom:.9rem">
+          Designa qué roles ven cada sección. El GADU y el V∴M∴ siempre lo ven todo.
+        </p>
+        ${LIBRARY.sections.map(s => `
+          <div class="admin-row">
+            <span class="lib-roman" style="font-size:1.3rem;min-width:1.4em">${s.roman}</span>
+            <span class="u-meta"><b>${s.title}</b></span>
+            ${['aprendiz','companero','vig2','vig1'].map(r => `
+              <button class="chip${sectionRoles(s).includes(r) ? ' on' : ''}" data-action="lib-acc" data-roman="${s.roman}" data-role="${r}" title="${ROLES[r].label}">${ROLES[r].short}</button>`).join('')}
+          </div>`).join('')}
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><span class="panel-title">▲ Respaldo del templo (solo GADU)</span></div>
       <div class="panel-body">
         <p style="font-family:var(--font-serif);font-style:italic;color:var(--muted);margin-bottom:.9rem">
           Los datos viven en el navegador de cada dispositivo: cada equipo o teléfono guarda su propio templo.
@@ -1170,7 +1232,7 @@ VIEWS.admin = () => {
           <a class="btn" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">▲ Abrir carpeta de Drive</a>
         </div>
       </div>
-    </section>
+    </section>` : ''}
   </div>`;
 };
 
@@ -1183,6 +1245,147 @@ BINDERS.admin = () => {
     toast(`${u.name} ahora es ${ROLES[sel.value].label}`);
   }));
 };
+
+/* ═══════════ VISTA: MONITOREO ═══════════ */
+VIEWS.monitor = () => {
+  const me = currentUser();
+  if (!canMonitor(me)) return '<div class="empty">Reservado a los Vigilantes y al Or∴.</div>';
+
+  const CHAINS = [
+    { vig:'vig1', sub:'companero', label:'Primer Vigilante → Compañeros Masones' },
+    { vig:'vig2', sub:'aprendiz',  label:'Segundo Vigilante → Aprendices Masones' },
+  ].filter(c => canSeeAll(me) || me.role === c.vig);
+
+  const reviewBadge = t => !t.review ? ''
+    : t.review.verdict === 'jp'
+      ? `<span class="jp-badge" title="Calificado por ${esc(userName(t.review.by))} el ${fmtShort(t.review.date)}">∴ Justo y Perfecto</span>`
+      : `<span class="jp-badge redo" title="Devuelto por ${esc(userName(t.review.by))}">↺ En ajustes</span>`;
+
+  const subBlock = (u, gradable) => {
+    const assigned = (u.data.tasks || []).filter(t => t.assignedBy);
+    const jp = assigned.filter(t => t.review && t.review.verdict === 'jp').length;
+    const pct = assigned.length ? Math.round(jp / assigned.length * 100) : 0;
+    return `
+    <div class="mon-sub">
+      <div class="mon-sub-head">
+        <span class="u-avatar">${esc(u.name.charAt(0).toUpperCase())}</span>
+        <span class="u-meta"><b>${esc(u.name)}</b><span>${esc(roleLabel(u))} · última actividad: ${u.lastActive ? fmtShort(u.lastActive) : '—'}</span></span>
+        <span class="u-stats">
+          <span><b>${assigned.length}</b> asignados</span>
+          <span><b>${assigned.filter(t => t.status === 'done').length}</b> terminados</span>
+          <span><b>${jp}</b> J∴P∴</span>
+        </span>
+        <div class="mon-bar"><div class="progress-rail"><div class="progress-fill" style="width:${pct}%"></div></div></div>
+      </div>
+      ${assigned.map(t => `
+        <div class="deleg-row">
+          <span class="d-title${t.status === 'done' ? '" style="color:var(--faint)' : ''}">${esc(t.title)}</span>
+          ${taskDueBadge(t)}
+          <span class="d-status">${STATUS_META[t.status][0]}</span>
+          ${reviewBadge(t)}
+          ${gradable && t.status === 'done' && (!t.review || t.review.verdict === 'ajustes') ? `
+            <button class="btn sm gold" data-action="grade-jp" data-user="${u.id}" data-task="${t.id}">∴ Justo y Perfecto</button>
+            <button class="btn sm" data-action="grade-redo" data-user="${u.id}" data-task="${t.id}">↺ Volver a labrar</button>` : ''}
+        </div>`).join('') || '<p class="tray-hint">Sin trabajos asignados todavía.</p>'}
+    </div>`;
+  };
+
+  return `
+  <div class="dash-hero">
+    <span class="watermark">◎</span>
+    <p class="epigraph">Vigilancia del trabajo</p>
+    <h1 class="dash-title">Monitoreo</h1>
+    <p class="dash-sub">Sigue el avance de los hermanos a tu cargo y declara los trabajos Justos y Perfectos.</p>
+  </div>
+  <div class="tasks-toolbar">
+    ${assignTargets(me).length ? '<button class="btn gold" data-action="assign-work">☩ Asignar trabajo</button>' : ''}
+  </div>
+  ${CHAINS.map(c => {
+    const vigs = STORE.users.filter(u => u.role === c.vig && u.status === 'active');
+    const subs = STORE.users.filter(u => u.role === c.sub && u.status === 'active');
+    return `
+    <section class="panel" style="margin-bottom:1.1rem">
+      <div class="panel-head"><span class="panel-title">◎ ${c.label}</span>
+        ${canSeeAll(me) ? `<span style="margin-left:auto;font-size:.75rem;color:var(--muted)">Vigilante${vigs.length === 1 ? '' : 's'}: ${vigs.map(v => esc(v.name)).join(', ') || '— sin asignar —'}</span>` : ''}
+      </div>
+      <div class="panel-body">
+        ${subs.map(u => subBlock(u, canGradeRole(me, c.sub))).join('') || '<div class="empty">Aún no hay hermanos en este grado.</div>'}
+      </div>
+    </section>`;
+  }).join('')}`;
+};
+
+/* ═══════════ MODAL: ASIGNAR TRABAJO ═══════════ */
+function openAssignModal() {
+  const me = currentUser();
+  const targets = assignTargets(me);
+  if (!targets.length) { toast('No tienes hermanos a tu cargo'); return; }
+  openModal(`
+  <div class="modal">
+    <div class="modal-head"><h3>☩ Asignar trabajo</h3>
+      <button class="icon-btn" data-action="close-modal">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Título del trabajo</label><input id="am-title" placeholder="p. ej. Plancha sobre el silencio del aprendiz"></div>
+      <div class="field"><label>Encomendar a</label>
+        <select id="am-target">${targets.map(u => `<option value="${u.id}">${esc(u.name)} — ${esc(roleLabel(u))}</option>`).join('')}</select>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Fecha de entrega</label><input id="am-due" type="date" value="${addDays(today(), 7)}"></div>
+        <div class="field"><label>Prioridad</label>
+          <select id="am-priority"><option value="alta">Alta</option><option value="media" selected>Media</option><option value="baja">Baja</option></select>
+        </div>
+      </div>
+      <div class="field"><label>Instrucciones</label><textarea id="am-brief" rows="3" placeholder="Qué se espera del trabajo, extensión, enfoque…"></textarea></div>
+      <hr>
+      <p style="font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)">Material de estudio (opcional — aparecerá en la Biblioteca)</p>
+      <div class="field"><label>Título del material</label><input id="am-doc-title" placeholder="Se usa el título del trabajo si lo dejas vacío"></div>
+      <div class="field"><label>Enlace (Drive, web…)</label><input id="am-doc-url" type="url" placeholder="https://drive.google.com/…"></div>
+      <div class="field"><label>… o archivo pequeño (máx. 1,5 MB)</label><input id="am-doc-file" type="file"></div>
+      <div class="field"><label>Descripción del material</label><input id="am-doc-desc" placeholder="Qué es y para qué estudiarlo"></div>
+      <div class="modal-foot">
+        <button class="btn" data-action="close-modal">Cancelar</button>
+        <button class="btn gold" id="am-save">☩ Asignar</button>
+      </div>
+    </div>
+  </div>`, () => {
+    $('#am-save').addEventListener('click', () => {
+      const title = $('#am-title').value.trim();
+      if (!title) { toast('El trabajo necesita un título'); $('#am-title').focus(); return; }
+      const target = getUser($('#am-target').value);
+      if (!target) return;
+      const docTitle = $('#am-doc-title').value.trim() || `Material: ${title}`;
+      const docDesc = $('#am-doc-desc').value.trim();
+      const url = $('#am-doc-url').value.trim();
+      const file = $('#am-doc-file').files[0];
+
+      const finish = doc => {
+        let docId = null;
+        if (doc) {
+          docId = uid();
+          STORE.meta.customDocs.push({ id: docId, title: doc.title, desc: doc.desc, url: doc.url || '', dataUrl: doc.dataUrl || '', fileName: doc.fileName || '', addedBy: me.id, roles: [target.role], created: today() });
+        }
+        target.data.tasks.unshift({
+          id: uid(), title, status: 'todo', priority: $('#am-priority').value,
+          due: $('#am-due').value, project: 'Encomienda', subtasks: [],
+          created: today(), assignedBy: me.id, brief: $('#am-brief').value.trim(), docId,
+        });
+        save(); closeModal(); render();
+        toast(`☩ Trabajo asignado a ${target.name}${doc ? ' con material en la Biblioteca' : ''}`);
+      };
+
+      if (file) {
+        if (file.size > 1.5 * 1024 * 1024) { toast('Archivo demasiado grande (máx. 1,5 MB) — sube a Drive y pega el enlace'); return; }
+        const r = new FileReader();
+        r.onload = () => finish({ title: docTitle, desc: docDesc, dataUrl: r.result, fileName: file.name });
+        r.readAsDataURL(file);
+      } else if (url) {
+        finish({ title: docTitle, desc: docDesc, url });
+      } else {
+        finish(null);
+      }
+    });
+  });
+}
 
 /* ═══════════ MODALES ═══════════ */
 const modalRoot = $('#modal-root');
@@ -1239,7 +1442,9 @@ function openTaskModal(task) {
           ${targets.map(u => `<option value="${u.id}">${esc(u.name)} — ${esc(roleLabel(u))}</option>`).join('')}
         </select>
       </div>` : ''}
-      ${t.assignedBy ? `<p style="font-size:.85rem;color:var(--muted)">☩ Trabajo encomendado por «${esc(userName(t.assignedBy))}»</p>` : ''}
+      ${t.assignedBy ? `<p style="font-size:.85rem;color:var(--muted)">☩ Trabajo encomendado por «${esc(userName(t.assignedBy))}»${t.review ? (t.review.verdict === 'jp' ? ' · <b style="color:var(--gold)">declarado Justo y Perfecto ∴</b>' : ' · <b style="color:var(--red)">devuelto para ajustes ↺</b>') : ''}</p>` : ''}
+      ${t.brief ? `<blockquote style="font-family:var(--font-serif);font-style:italic;font-size:.98rem;color:var(--ink-2);border-left:2px solid var(--gold-dim);padding:.2em 0 .2em .9em;margin:0">${esc(t.brief)}</blockquote>` : ''}
+      ${(() => { const doc = t.docId && STORE.meta.customDocs.find(x => x.id === t.docId); return doc ? `<p style="font-size:.85rem">▤ Material: ${doc.url ? `<a href="${esc(doc.url)}" target="_blank" rel="noopener">${esc(doc.title)} ↗</a>` : doc.dataUrl ? `<a href="${doc.dataUrl}" download="${esc(doc.fileName || 'material')}">${esc(doc.title)} ⇩</a>` : esc(doc.title)}</p>` : ''; })()}
       <div class="field"><label>Subtareas</label>
         <div id="tm-subs">${subHtml()}</div>
         <div class="subtask-row"><input type="text" id="tm-newsub" placeholder="Añadir subtarea y pulsar Enter…"></div>
@@ -1372,11 +1577,13 @@ function paletteItems(query) {
     ['⚒','Ir a Tareas','3', () => go('tasks')],
     ['☉','Ir al Calendario','4', () => go('calendar')],
     ['▤','Ir a la Biblioteca','5', () => go('library')],
+    ...(canMonitor(me) ? [['◎','Ir a Monitoreo','7', () => go('monitor')]] : []),
     ...(canSeeAll(me) ? [['⚖','Ir a Administración','6', () => go('admin')]] : []),
+    ...(assignTargets(me).length ? [['☩','Asignar trabajo','', () => openAssignModal()]] : []),
     ['▲','Abrir carpeta de Drive','', () => window.open(DRIVE_FOLDER, '_blank')],
     ['◐','Alternar tema claro/oscuro','', () => ACTIONS.theme()],
     ['☰','Alternar barra lateral','[', () => ACTIONS.sidebar()],
-    ['⇩','Exportar respaldo JSON','', () => ACTIONS.export()],
+    ...(me.role === 'gadu' ? [['⇩','Exportar respaldo JSON','', () => ACTIONS.export()]] : []),
     ['⏻','Cerrar sesión','', () => ACTIONS.logout()],
   ];
   actions.forEach(([g, l, h, r]) => { if (!q || norm(l).includes(q)) push('Comandos', g, l, h, r); });
@@ -1458,6 +1665,7 @@ const ACTIONS = {
     </div></div>`),
   'close-modal': () => closeModal(),
   export: () => {
+    if (currentUser().role !== 'gadu') { toast('Solo el GADU custodia los respaldos'); return; }
     const owner = viewedUser();
     const blob = new Blob([JSON.stringify(owner.data, null, 2)], {type: 'application/json'});
     const a = document.createElement('a');
@@ -1467,6 +1675,7 @@ const ACTIONS = {
     toast('Respaldo del taller exportado');
   },
   'export-all': () => {
+    if (currentUser().role !== 'gadu') { toast('Solo el GADU custodia los respaldos'); return; }
     const blob = new Blob([JSON.stringify(STORE, null, 2)], {type: 'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -1474,7 +1683,45 @@ const ACTIONS = {
     a.click(); URL.revokeObjectURL(a.href);
     toast('Respaldo completo del templo exportado — guárdalo en Drive');
   },
-  import: () => $('#import-file').click(),
+  import: () => {
+    if (currentUser().role !== 'gadu') { toast('Solo el GADU custodia los respaldos'); return; }
+    $('#import-file').click();
+  },
+
+  /* monitoreo y encomiendas */
+  'assign-work': () => openAssignModal(),
+  'grade-jp': d => {
+    const u = getUser(d.user); if (!u) return;
+    const t = (u.data.tasks || []).find(x => x.id === d.task); if (!t) return;
+    if (!canGradeRole(currentUser(), u.role)) { toast('No te corresponde calificar este grado'); return; }
+    t.review = { by: currentUser().id, verdict: 'jp', date: today() };
+    save(); render(); toast(`∴ Trabajo de ${u.name} declarado Justo y Perfecto`);
+  },
+  'grade-redo': d => {
+    const u = getUser(d.user); if (!u) return;
+    const t = (u.data.tasks || []).find(x => x.id === d.task); if (!t) return;
+    if (!canGradeRole(currentUser(), u.role)) { toast('No te corresponde calificar este grado'); return; }
+    t.review = { by: currentUser().id, verdict: 'ajustes', date: today() };
+    t.status = 'doing';
+    save(); render(); toast(`↺ Trabajo devuelto a ${u.name} para ajustes`);
+  },
+  'lib-acc': d => {
+    if (currentUser().role !== 'gadu') { toast('Solo el GADU designa la visibilidad'); return; }
+    const sec = LIBRARY.sections.find(s => s.roman === d.roman); if (!sec) return;
+    const cur = [...sectionRoles(sec)];
+    const i = cur.indexOf(d.role);
+    if (i >= 0) cur.splice(i, 1); else cur.push(d.role);
+    STORE.meta.libAccess[sec.roman] = cur;
+    save(); render();
+  },
+  'doc-del': d => {
+    const doc = STORE.meta.customDocs.find(x => x.id === d.id); if (!doc) return;
+    const me = currentUser();
+    if (me.role !== 'gadu' && doc.addedBy !== me.id) { toast('No puedes retirar este material'); return; }
+    if (!confirm(`¿Retirar «${doc.title}» de la Biblioteca?`)) return;
+    STORE.meta.customDocs = STORE.meta.customDocs.filter(x => x.id !== d.id);
+    save(); render(); toast('Material retirado');
+  },
 
   /* usuarios */
   'view-as': d => { UI.viewAs = d.id; UI.noteId = null; go('dashboard'); toast(`◉ Modo GADU: taller de ${userName(d.id)}`); },
@@ -1630,7 +1877,7 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
 
   const k = e.key.toLowerCase();
-  const views = { '1':'dashboard', '2':'notes', '3':'tasks', '4':'calendar', '5':'library', '6':'admin' };
+  const views = { '1':'dashboard', '2':'notes', '3':'tasks', '4':'calendar', '5':'library', '6':'admin', '7':'monitor' };
   if (views[k]) { go(views[k]); }
   else if (k === 'n') { e.preventDefault(); ACTIONS['new-note'](); }
   else if (k === 't') { e.preventDefault(); openTaskModal(null); }
@@ -1640,7 +1887,7 @@ document.addEventListener('keydown', e => {
 });
 
 /* ═══════════ RUTA INICIAL ═══════════ */
-const HASH_VIEWS = { '#/tablero':'dashboard', '#/notas':'notes', '#/tareas':'tasks', '#/calendario':'calendar', '#/biblioteca':'library', '#/administracion':'admin' };
+const HASH_VIEWS = { '#/tablero':'dashboard', '#/notas':'notes', '#/tareas':'tasks', '#/calendario':'calendar', '#/biblioteca':'library', '#/administracion':'admin', '#/monitoreo':'monitor' };
 if (HASH_VIEWS[location.hash]) UI.view = HASH_VIEWS[location.hash];
 window.addEventListener('hashchange', () => { if (HASH_VIEWS[location.hash] && currentUser()) go(HASH_VIEWS[location.hash]); });
 

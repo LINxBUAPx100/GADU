@@ -671,6 +671,19 @@ hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
 .deleg-row .d-owner{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);min-width:7em}
 .deleg-row .d-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .deleg-row .d-status{font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.jp-badge{
+  font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap;
+  color:var(--gold-hi);border:1px solid var(--gold-dim);border-radius:99px;padding:.18em .7em;
+  background:rgba(201,163,92,.1);
+}
+.jp-badge.redo{color:var(--red);border-color:rgba(192,91,62,.5);background:rgba(192,91,62,.08)}
+.mon-sub{padding:.7rem 0;border-bottom:1px dashed var(--line-soft)}
+.mon-sub:last-child{border-bottom:none}
+.mon-sub-head{display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;margin-bottom:.4rem}
+.mon-sub-head .u-meta{flex:1;min-width:130px}
+.mon-sub-head .u-meta b{display:block;font-weight:500}
+.mon-sub-head .u-meta span{font-size:.72rem;color:var(--muted)}
+.mon-bar{width:130px}
 .lib-section.locked{opacity:.75}
 .lib-locked-card{
   border:1px dashed var(--gold-dim);border-radius:var(--r-lg);padding:1.6rem;text-align:center;

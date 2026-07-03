@@ -46,6 +46,9 @@
       <a class="nav-item" data-action="go" data-view="library" data-nav="library" href="#/biblioteca">
         <span class="nav-glyph">▤</span><span class="nav-label">Biblioteca</span><kbd>5</kbd>
       </a>
+      <a class="nav-item" data-action="go" data-view="monitor" data-nav="monitor" href="#/monitoreo" hidden id="nav-monitor">
+        <span class="nav-glyph">◎</span><span class="nav-label">Monitoreo</span><kbd>7</kbd>
+      </a>
       <a class="nav-item" data-action="go" data-view="admin" data-nav="admin" href="#/administracion" hidden id="nav-admin">
         <span class="nav-glyph">⚖</span><span class="nav-label">Administración</span><kbd>6</kbd>
       </a>
@@ -63,9 +66,9 @@
       <a class="side-tool" id="drive-link" href="#" target="_blank" rel="noopener" title="Abrir carpeta de Google Drive">
         <span class="nav-glyph">▲</span><span class="nav-label">Drive</span>
       </a>
-      <div class="side-tools-row">
-        <button class="mini-tool" data-action="export" title="Exportar respaldo JSON">Exportar</button>
-        <button class="mini-tool" data-action="import" title="Importar respaldo JSON">Importar</button>
+      <div class="side-tools-row" id="backup-tools">
+        <button class="mini-tool" data-action="export" title="Exportar respaldo JSON (solo GADU)">Exportar</button>
+        <button class="mini-tool" data-action="import" title="Importar respaldo JSON (solo GADU)">Importar</button>
       </div>
       <div class="user-chip" id="user-chip"></div>
       <p class="side-motto">A la G∴ del G∴A∴D∴U∴</p>
