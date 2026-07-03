@@ -150,6 +150,8 @@ function ensureMeta() {
   STORE.meta.customDocs = STORE.meta.customDocs || [];
   STORE.meta.libAccess = STORE.meta.libAccess || {};
   STORE.meta.libHidden = STORE.meta.libHidden || {};
+  STORE.meta.removedUsers = STORE.meta.removedUsers || [];
+  STORE.meta.removedDocs = STORE.meta.removedDocs || [];
 }
 ensureMeta();
 
@@ -192,15 +194,62 @@ function updateSyncUI() {
   el.textContent = `⌂ ${TEMPLE.name} · ${SYNC.busy ? 'guardando…' : SYNC.dirty ? 'cambios locales' : SYNC.offline ? 'sin conexión (local)' : 'sincronizado'}`;
 }
 
+/* marca de revisión: en las fusiones gana la copia más reciente de cada usuario */
+const touch = u => { if (u) u.rev = Date.now(); };
+const isEditingText = () => /^(input|textarea)$/i.test((document.activeElement || {}).tagName || '');
+
+function mergeUsers(localUsers, remoteUsers) {
+  const map = new Map();
+  (remoteUsers || []).forEach(u => map.set(u.id, u));
+  (localUsers || []).forEach(u => {
+    const r = map.get(u.id);
+    map.set(u.id, !r || (u.rev || 0) >= (r.rev || 0) ? u : r);
+  });
+  return [...map.values()];
+}
+function mergeMeta(local, remote) {
+  local = local || {}; remote = remote || {};
+  const docs = new Map();
+  (remote.customDocs || []).forEach(d => docs.set(d.id, d));
+  (local.customDocs || []).forEach(d => docs.set(d.id, d));
+  return {
+    libAccess: { ...(remote.libAccess || {}), ...(local.libAccess || {}) },
+    libHidden: { ...(remote.libHidden || {}), ...(local.libHidden || {}) },
+    customDocs: [...docs.values()],
+    removedUsers: [...new Set([...(remote.removedUsers || []), ...(local.removedUsers || [])])],
+    removedDocs: [...new Set([...(remote.removedDocs || []), ...(local.removedDocs || [])])],
+  };
+}
+/* fusiona lo remoto con lo local: une usuarios por id (nunca pisa a nadie)
+   y aplica las lápidas de eliminados para que no resuciten */
+function mergeIntoStore(remote) {
+  const before = JSON.stringify([STORE.users, STORE.meta]);
+  const meta = mergeMeta(STORE.meta, remote.meta);
+  const deadU = new Set(meta.removedUsers);
+  const deadD = new Set(meta.removedDocs);
+  meta.customDocs = meta.customDocs.filter(d => !deadD.has(d.id));
+  STORE.users = mergeUsers(STORE.users, remote.users).filter(u => !deadU.has(u.id));
+  STORE.meta = meta;
+  ensureMeta();
+  return JSON.stringify([STORE.users, STORE.meta]) !== before;
+}
+
 async function pushTemple() {
   if (!TEMPLE || SYNC.busy) return;
   SYNC.busy = true; updateSyncUI();
   try {
+    /* leer → fusionar → escribir: jamás pisar lo que subieron otros dispositivos */
+    const rows = await sbFetch(`/temples?id=eq.${TEMPLE.id}&select=data`);
+    const remote = rows && rows[0] && rows[0].data;
+    let changed = false;
+    if (remote && Array.isArray(remote.users)) changed = mergeIntoStore(remote);
     await sbFetch(`/temples?id=eq.${TEMPLE.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ data: { users: STORE.users, meta: STORE.meta }, updated_at: new Date().toISOString() }),
     });
+    localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
     SYNC.dirty = false; SYNC.offline = false;
+    if (changed && !isEditingText()) render();
   } catch { SYNC.offline = true; }
   SYNC.busy = false; updateSyncUI();
   if (SYNC.dirty) pushSoon(); /* llegaron cambios mientras subíamos */
@@ -208,19 +257,20 @@ async function pushTemple() {
 const pushSoon = debounce(pushTemple, 1500);
 
 async function pullTemple(silent = true) {
-  if (!TEMPLE || SYNC.dirty || SYNC.busy) return;
+  if (!TEMPLE || SYNC.busy) return;
+  if (SYNC.dirty) { pushSoon(); return; } /* el push fusiona de todos modos */
   try {
     const rows = await sbFetch(`/temples?id=eq.${TEMPLE.id}&select=data`);
     const remote = rows && rows[0] && rows[0].data;
     if (remote && Array.isArray(remote.users)) {
-      if (JSON.stringify(remote) !== JSON.stringify({ users: STORE.users, meta: STORE.meta })) {
-        STORE.users = remote.users;
-        STORE.meta = remote.meta || {};
-        ensureMeta();
+      const changed = mergeIntoStore(remote);
+      if (changed) {
         localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
-        render();
+        if (!isEditingText()) render();
         if (!silent) toast('⟳ Templo sincronizado');
       } else if (!silent) toast('⟳ Todo al día');
+      /* si la fusión rescató algo que la nube no tenía, súbelo */
+      if (JSON.stringify({ users: STORE.users, meta: STORE.meta }) !== JSON.stringify(remote)) { SYNC.dirty = true; pushSoon(); }
     }
     SYNC.offline = false;
   } catch { SYNC.offline = true; if (!silent) toast('Sin conexión — trabajando en local'); }
@@ -353,6 +403,7 @@ function bindData() {
 const save = () => {
   const me = currentUser();
   if (me && !UI.viewAs) me.lastActive = today();
+  touch(viewedUser()); /* la copia editada gana en las fusiones */
   persist();
 };
 
@@ -707,7 +758,7 @@ function renderAuth() {
       try { const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY)); if (legacy && legacy.notes) data = { notes: legacy.notes, tasks: legacy.tasks || [], events: legacy.events || [], libStatus: legacy.libStatus || {}, prefs: legacy.prefs || { theme:'dark', sidebar:true } }; } catch {}
       if (!data) data = seedAdminData();
       ensureHabits(data);
-      const u = { id: uid(), name, pass: pwHash(p1), role: 'gadu', status: 'active', requestedRole: null, created: today(), lastActive: today(), data };
+      const u = { id: uid(), name, pass: pwHash(p1), role: 'gadu', status: 'active', requestedRole: null, created: today(), lastActive: today(), rev: Date.now(), data };
       STORE.users.push(u);
       SESSION.userId = u.id; saveSession();
       AUTH.error = '';
@@ -746,7 +797,7 @@ function renderAuth() {
       if (STORE.users.some(u => norm(u.name) === norm(name))) { AUTH.error = 'Ese nombre ya está en el templo.'; return renderAuth(); }
       if (p1.length < 4) { AUTH.error = 'La contraseña debe tener al menos 4 caracteres.'; return renderAuth(); }
       if (p1 !== p2) { AUTH.error = 'Las contraseñas no coinciden.'; return renderAuth(); }
-      const u = { id: uid(), name, pass: pwHash(p1), role: 'aprendiz', status: 'pending', requestedRole: $('#au-role').value, created: today(), lastActive: today(), data: blankData(name) };
+      const u = { id: uid(), name, pass: pwHash(p1), role: 'aprendiz', status: 'pending', requestedRole: $('#au-role').value, created: today(), lastActive: today(), rev: Date.now(), data: blankData(name) };
       STORE.users.push(u);
       SESSION.userId = u.id; saveSession();
       AUTH.error = ''; AUTH.mode = 'login';
@@ -1494,6 +1545,7 @@ BINDERS.admin = () => {
     const u = getUser(sel.dataset.roleUser);
     if (!u) return;
     u.role = sel.value;
+    touch(u);
     save(); render();
     toast(`${u.name} ahora es ${ROLES[sel.value].label}`);
   }));
@@ -1622,6 +1674,7 @@ function openAssignModal() {
           due: $('#am-due').value, project: 'Encomienda', subtasks: [],
           created: today(), assignedBy: me.id, brief: $('#am-brief').value.trim(), docId,
         });
+        touch(target);
         save(); closeModal(); render();
         toast(`☩ Trabajo asignado a ${target.name}${doc ? ' con material en la Biblioteca' : ''}`);
       };
@@ -1737,6 +1790,7 @@ function openTaskModal(task) {
       if (isNew && targetId) {
         const target = getUser(targetId);
         target.data.tasks.unshift({ id: uid(), created: today(), assignedBy: me.id, ...v });
+        touch(target);
         save(); closeModal(); render();
         toast(`☩ Trabajo encomendado a ${target.name}`);
         return;
@@ -1969,6 +2023,7 @@ const ACTIONS = {
     const t = (u.data.tasks || []).find(x => x.id === d.task); if (!t) return;
     if (!canGradeRole(currentUser(), u.role)) { toast('No te corresponde calificar este grado'); return; }
     t.review = { by: currentUser().id, verdict: 'jp', date: today() };
+    touch(u);
     save(); render(); toast(`∴ Trabajo de ${u.name} declarado Justo y Perfecto`);
   },
   'grade-redo': d => {
@@ -1977,6 +2032,7 @@ const ACTIONS = {
     if (!canGradeRole(currentUser(), u.role)) { toast('No te corresponde calificar este grado'); return; }
     t.review = { by: currentUser().id, verdict: 'ajustes', date: today() };
     t.status = 'doing';
+    touch(u);
     save(); render(); toast(`↺ Trabajo devuelto a ${u.name} para ajustes`);
   },
   'lib-acc': d => {
@@ -2000,6 +2056,7 @@ const ACTIONS = {
     if (me.role !== 'gadu' && doc.addedBy !== me.id) { toast('No puedes retirar este material'); return; }
     if (!confirm(`¿Retirar «${doc.title}» de la Biblioteca?`)) return;
     STORE.meta.customDocs = STORE.meta.customDocs.filter(x => x.id !== d.id);
+    STORE.meta.removedDocs.push(d.id); /* lápida para la fusión */
     save(); render(); toast('Material retirado');
   },
 
@@ -2011,12 +2068,14 @@ const ACTIONS = {
     const sel = $(`#approve-role-${u.id}`);
     u.role = sel ? sel.value : (u.requestedRole || 'aprendiz');
     u.status = 'active'; u.requestedRole = null;
+    touch(u);
     save(); render(); toast(`✓ ${u.name} aprobado como ${ROLES[u.role].label}`);
   },
   'reject-user': d => {
     const u = getUser(d.id); if (!u) return;
     if (!confirm(`¿Rechazar y eliminar la solicitud de «${u.name}»?`)) return;
     STORE.users = STORE.users.filter(x => x.id !== u.id);
+    STORE.meta.removedUsers.push(u.id); /* lápida: que no resucite en la fusión */
     save(); render(); toast('Solicitud rechazada');
   },
   'reset-pass': d => {
@@ -2024,12 +2083,14 @@ const ACTIONS = {
     const p = prompt(`Nueva contraseña para ${u.name} (mínimo 4 caracteres):`);
     if (!p || p.length < 4) { if (p !== null) toast('Contraseña demasiado corta'); return; }
     u.pass = pwHash(p);
+    touch(u);
     save(); toast(`Contraseña de ${u.name} restablecida`);
   },
   'del-user': d => {
     const u = getUser(d.id); if (!u) return;
     if (!confirm(`¿Eliminar a «${u.name}» y TODO su taller (notas, tareas, eventos)? Esta acción no se puede deshacer.`)) return;
     STORE.users = STORE.users.filter(x => x.id !== u.id);
+    STORE.meta.removedUsers.push(u.id); /* lápida: que no resucite en la fusión */
     if (UI.viewAs === u.id) UI.viewAs = null;
     save(); render(); toast(`${u.name} ha dejado el templo`);
   },
@@ -2204,9 +2265,10 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 /* re-render al cruzar el punto de quiebre móvil/escritorio */
 window.addEventListener('resize', debounce(() => { if (currentUser()) render(); }, 250));
 
-/* sincronización con el templo: al volver a la pestaña o recuperar conexión */
+/* sincronización con el templo: al volver a la pestaña, recuperar conexión o cada minuto */
 window.addEventListener('focus', () => { if (TEMPLE) pullTemple(); });
 window.addEventListener('online', () => { if (TEMPLE) (SYNC.dirty ? pushTemple() : pullTemple()); });
+setInterval(() => { if (TEMPLE && currentUser() && document.visibilityState === 'visible') pullTemple(); }, 60000);
 
 render();
 if (currentUser()) showSplash(currentUser());
