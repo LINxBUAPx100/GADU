@@ -1,0 +1,15 @@
+{
+  "name": "GADU — Cuaderno Masónico",
+  "short_name": "GADU",
+  "description": "Cuaderno personal de trabajos y avances masónicos: notas, tareas, calendario y biblioteca.",
+  "lang": "es",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0b08",
+  "theme_color": "#0d0b08",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

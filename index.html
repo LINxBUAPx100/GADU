@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>∴ GADU — Cuaderno Masónico</title>
+<meta name="description" content="GADU — cuaderno personal de trabajos y avances masónicos: notas, tareas, calendario y biblioteca.">
+<meta name="theme-color" content="#0d0b08">
+<meta property="og:title" content="∴ GADU — Cuaderno Masónico">
+<meta property="og:description" content="Notas, tareas, calendario y biblioteca del camino de estudio masónico.">
+<meta property="og:type" content="website">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d0b08'/%3E%3Ctext x='32' y='46' font-size='40' text-anchor='middle' fill='%23c9a35c'%3E%E2%88%B4%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ══════════ SIDEBAR ══════════ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand" data-action="go" data-view="dashboard" title="GADU — Tablero">
+      <span class="brand-mark">∴</span>
+      <span class="brand-word">G<i>∴</i>A<i>∴</i>D<i>∴</i>U<i>∴</i></span>
+    </div>
+
+    <div class="side-rule"><span class="mosaic-strip"></span></div>
+
+    <nav class="side-nav">
+      <a class="nav-item" data-action="go" data-view="dashboard" data-nav="dashboard" href="#/tablero">
+        <span class="nav-glyph">◫</span><span class="nav-label">Tablero</span><kbd>1</kbd>
+      </a>
+      <a class="nav-item" data-action="go" data-view="notes" data-nav="notes" href="#/notas">
+        <span class="nav-glyph">✒</span><span class="nav-label">Notas</span><kbd>2</kbd>
+      </a>
+      <a class="nav-item" data-action="go" data-view="tasks" data-nav="tasks" href="#/tareas">
+        <span class="nav-glyph">⚒</span><span class="nav-label">Tareas</span><kbd>3</kbd>
+      </a>
+      <a class="nav-item" data-action="go" data-view="calendar" data-nav="calendar" href="#/calendario">
+        <span class="nav-glyph">☉</span><span class="nav-label">Calendario</span><kbd>4</kbd>
+      </a>
+      <a class="nav-item" data-action="go" data-view="library" data-nav="library" href="#/biblioteca">
+        <span class="nav-glyph">▤</span><span class="nav-label">Biblioteca</span><kbd>5</kbd>
+      </a>
+      <a class="nav-item" data-action="go" data-view="admin" data-nav="admin" href="#/administracion" hidden id="nav-admin">
+        <span class="nav-glyph">⚖</span><span class="nav-label">Administración</span><kbd>6</kbd>
+      </a>
+    </nav>
+
+    <div class="side-spacer"></div>
+
+    <div class="side-foot">
+      <button class="side-tool" data-action="palette" title="Buscar en todo (Ctrl+K)">
+        <span class="nav-glyph">⌕</span><span class="nav-label">Buscar</span><kbd>Ctrl K</kbd>
+      </button>
+      <button class="side-tool" data-action="theme" title="Alternar tema">
+        <span class="nav-glyph">◐</span><span class="nav-label">Tema</span>
+      </button>
+      <a class="side-tool" id="drive-link" href="#" target="_blank" rel="noopener" title="Abrir carpeta de Google Drive">
+        <span class="nav-glyph">▲</span><span class="nav-label">Drive</span>
+      </a>
+      <div class="side-tools-row">
+        <button class="mini-tool" data-action="export" title="Exportar respaldo JSON">Exportar</button>
+        <button class="mini-tool" data-action="import" title="Importar respaldo JSON">Importar</button>
+      </div>
+      <div class="user-chip" id="user-chip"></div>
+      <p class="side-motto">A la G∴ del G∴A∴D∴U∴</p>
+    </div>
+  </aside>
+
+  <!-- ══════════ MAIN ══════════ -->
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn" data-action="sidebar" title="Ocultar / mostrar barra lateral ( [ )">☰</button>
+      <div class="crumb" id="crumb">Tablero</div>
+      <div class="topbar-right">
+        <button class="search-pill" data-action="palette">
+          <span>⌕</span> Buscar o ejecutar… <kbd>Ctrl K</kbd>
+        </button>
+        <button class="icon-btn" data-action="help" title="Atajos de teclado ( ? )">?</button>
+        <span class="top-date" id="top-date"></span>
+      </div>
+    </header>
+
+    <div class="mode-banner" id="mode-banner" hidden></div>
+    <main class="view" id="view" aria-live="polite"></main>
+  </div>
+</div>
+
+<!-- ══════════ ACCESO ══════════ -->
+<div class="auth-veil" id="auth" hidden></div>
+
+<!-- ══════════ OVERLAYS ══════════ -->
+<div class="palette-veil" id="palette" hidden>
+  <div class="palette" role="dialog" aria-label="Paleta de comandos">
+    <div class="palette-head">
+      <span class="palette-glyph">∴</span>
+      <input id="palette-input" type="text" placeholder="Buscar notas, tareas, libros… o ejecutar un comando" autocomplete="off" spellcheck="false">
+      <kbd>esc</kbd>
+    </div>
+    <div class="palette-list" id="palette-list"></div>
+  </div>
+</div>
+
+<div class="modal-veil" id="modal-root" hidden></div>
+<div class="toasts" id="toasts"></div>
+<input type="file" id="import-file" accept=".json,application/json" hidden>
+
+<script src="app.js"></script>
+</body>
+</html>
