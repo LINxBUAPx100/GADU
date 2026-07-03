@@ -435,6 +435,54 @@ function render() {
   if (BINDERS[UI.view]) BINDERS[UI.view]();
 }
 
+/* ═══════════ ANTESALA (bienvenida por rol + frase) ═══════════ */
+const ROLE_WELCOME = {
+  gadu: 'Administrador ∴ GADU — el templo entero está bajo tu mirada. Que tu compás trace siempre con justicia.',
+  venerable: 'Venerable Maestro — desde el Or∴ tu luz ordena el trabajo. La logia se levanta contigo.',
+  vig1: 'Primer Vigilante — la columna del mediodía te confía a los Compañeros. Mide sus obras con el nivel.',
+  vig2: 'Segundo Vigilante — tuya es la guía de los Aprendices. Enséñales a desbastar la piedra.',
+  companero: 'Compañero Masón — el cincel ya conoce tu mano. Del trabajo bien hecho nace la piedra pulida.',
+  aprendiz: 'Aprendiz Masón — escucha, observa y calla. La piedra bruta espera tu primer golpe de maceta.',
+};
+const PHRASES = [
+  'Conócete a ti mismo y conocerás el universo y a los dioses.',
+  'V∴I∴T∴R∴I∴O∴L∴ — visita el interior de la tierra y, rectificando, encontrarás la piedra oculta.',
+  'La piedra bruta solo se pule con el trabajo constante del cincel.',
+  'El pensamiento es lo que vuelve libre al hombre.',
+  'Nadie entra aquí si no ama la geometría.',
+  'La luz no se regala: se conquista trabajando en el silencio.',
+  'Lo que la soberbia derriba, la humildad lo edifica.',
+  'Cada tenida es un peldaño; cada trabajo, un golpe de maceta.',
+  'El verdadero templo se construye en el corazón del masón.',
+  'Ordo ab chao — del caos, el orden.',
+  'La escuadra rige las acciones; el compás, los deseos.',
+  'Ningún viento es favorable para quien no sabe a qué puerto va.',
+  'El silencio es la primera piedra del aprendizaje.',
+  'De lo general a lo particular; de la piedra bruta a la piedra pulida.',
+  'La constancia vence lo que la fuerza no alcanza.',
+  'Somos obreros de una obra que no veremos terminada: aun así, labramos.',
+];
+
+function showSplash(u) {
+  if ($('.splash')) return;
+  const phrase = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+  const el = document.createElement('div');
+  el.className = 'splash';
+  el.innerHTML = `
+  <div class="splash-inner">
+    <span class="splash-mark">∴</span>
+    <h2 class="splash-name">Salud, ${esc(u.name)}</h2>
+    <p class="splash-role">${esc(ROLE_WELCOME[u.role] || ROLE_WELCOME.aprendiz)}</p>
+    <div class="splash-rule"><span class="mosaic-strip"></span></div>
+    <p class="splash-phrase">«${esc(phrase)}»</p>
+    <span class="splash-hint">∴ entrando al templo ∴</span>
+  </div>`;
+  document.body.appendChild(el);
+  const out = () => { if (!el.parentNode) return; el.classList.add('out'); setTimeout(() => el.remove(), 750); };
+  el.addEventListener('click', out);
+  setTimeout(out, 3600);
+}
+
 /* ═══════════ PANTALLA DE ACCESO ═══════════ */
 const AUTH = { mode: 'login', pick: null, error: '' };
 
