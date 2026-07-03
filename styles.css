@@ -85,7 +85,7 @@ kbd{
 hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
 
 /* ═══════════ LAYOUT ═══════════ */
-.app{display:flex;height:100vh}
+.app{display:flex;height:100vh;height:100dvh}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
 .main::before{ /* candle glow from the East */
   content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
@@ -309,7 +309,7 @@ hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
 .proj-card span{font-size:.74rem;color:var(--muted);letter-spacing:.05em}
 
 /* ═══════════ NOTES ═══════════ */
-.notes-wrap{display:grid;grid-template-columns:300px 1fr;gap:1.1rem;height:calc(100vh - 132px);min-height:420px}
+.notes-wrap{display:grid;grid-template-columns:300px 1fr;gap:1.1rem;height:calc(100vh - 132px);height:calc(100dvh - 132px);min-height:420px}
 .notes-list{display:flex;flex-direction:column;overflow:hidden}
 .notes-list .panel-body{overflow-y:auto;flex:1;padding:.5rem .6rem;display:flex;flex-direction:column;gap:2px}
 .notes-search{margin:.7rem .8rem 0}
@@ -411,14 +411,15 @@ hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
   text-transform:capitalize;min-width:11.5em;
 }
 .cal-nav{display:flex;gap:4px}
-.month-grid{display:grid;grid-template-columns:repeat(7,1fr);border-left:1px solid var(--line-soft);border-top:1px solid var(--line-soft)}
+.month-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-left:1px solid var(--line-soft);border-top:1px solid var(--line-soft)}
 .dow{
   font-family:var(--font-display);font-size:.66rem;letter-spacing:.24em;text-transform:uppercase;
   color:var(--muted);text-align:center;padding:.55em 0;border-right:1px solid var(--line-soft);
   border-bottom:1px solid var(--line-soft);background:var(--bg-2);
 }
 .day-cell{
-  min-height:96px;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);
+  min-height:96px;min-width:0;overflow:hidden;
+  border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);
   padding:.4rem .45rem;cursor:pointer;transition:.12s;position:relative;
 }
 .day-cell:hover{background:rgba(201,163,92,.05)}
@@ -564,11 +565,12 @@ hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
 .modal-head h3{font-family:var(--font-display);font-weight:600;font-size:1rem;letter-spacing:.2em;text-transform:uppercase;color:var(--gold)}
 .modal-head .icon-btn{margin-left:auto}
 .modal-body{padding:1rem 1.4rem 1.4rem;display:flex;flex-direction:column;gap:.9rem}
-.field{display:flex;flex-direction:column;gap:.3rem}
+.field{display:flex;flex-direction:column;gap:.3rem;min-width:0}
 .field label{font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+.field input,.field select,.field textarea{width:100%;min-width:0;max-width:100%}
 .field-row{display:flex;gap:.8rem}
 .field-row .field{flex:1}
-.modal-foot{display:flex;gap:.6rem;justify-content:flex-end;padding-top:.4rem}
+.modal-foot{display:flex;gap:.6rem;row-gap:.5rem;justify-content:flex-end;padding-top:.4rem;flex-wrap:wrap}
 .modal-foot .btn.ghost{margin-right:auto}
 .subtask-row{display:flex;align-items:center;gap:.6rem;padding:.3rem 0}
 .subtask-row input[type="text"]{flex:1;padding:.3em .6em;font-size:.88rem}

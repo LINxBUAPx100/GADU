@@ -404,12 +404,17 @@ const VIEW_NAMES = { dashboard:'Tablero', notes:'Notas', tasks:'Tareas', calenda
 const viewEl = $('#view');
 const authEl = $('#auth');
 
+const VIEW_HASH = { dashboard:'#/tablero', notes:'#/notas', tasks:'#/tareas', calendar:'#/calendario', library:'#/biblioteca', monitor:'#/monitoreo', admin:'#/administracion' };
+
 function go(view) {
   if (view === 'admin' && !canSeeAll(currentUser())) { toast('Reservado al Or∴ de administración'); return; }
   if (view === 'monitor' && !canMonitor(currentUser())) { toast('Reservado a los Vigilantes y al Or∴'); return; }
   UI.view = view;
   if (isMobile()) UI.sideOpen = false; /* navegar cierra el menú en móvil */
   render();
+  /* historial real: cada vista es una entrada — el botón atrás recorre las vistas */
+  const h = VIEW_HASH[UI.view];
+  if (h && location.hash !== h) location.hash = h;
 }
 
 function render() {
@@ -1993,7 +1998,17 @@ document.addEventListener('keydown', e => {
 /* ═══════════ RUTA INICIAL ═══════════ */
 const HASH_VIEWS = { '#/tablero':'dashboard', '#/notas':'notes', '#/tareas':'tasks', '#/calendario':'calendar', '#/biblioteca':'library', '#/administracion':'admin', '#/monitoreo':'monitor' };
 if (HASH_VIEWS[location.hash]) UI.view = HASH_VIEWS[location.hash];
-window.addEventListener('hashchange', () => { if (HASH_VIEWS[location.hash] && currentUser()) go(HASH_VIEWS[location.hash]); });
+else history.replaceState(null, '', '#/tablero'); /* entrada base del historial */
+
+window.addEventListener('hashchange', () => {
+  if (!currentUser()) return;
+  let v = HASH_VIEWS[location.hash] || 'dashboard';
+  if ((v === 'admin' && !canSeeAll(currentUser())) || (v === 'monitor' && !canMonitor(currentUser()))) v = 'dashboard';
+  if (v === UI.view) return; /* el hash lo acaba de fijar go(): no re-render */
+  UI.view = v;
+  if (isMobile()) UI.sideOpen = false;
+  render();
+});
 
 /* service worker: offline + instalable (GitHub Pages sirve por HTTPS) */
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
