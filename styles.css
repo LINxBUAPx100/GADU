@@ -161,6 +161,10 @@ hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
   font-family:var(--font-serif);font-style:italic;font-size:.82rem;color:var(--faint);
   text-align:center;padding-top:.9rem;letter-spacing:.05em;
 }
+.sync-line{
+  font-size:.66rem;letter-spacing:.08em;color:var(--faint);text-align:center;
+  padding-top:.55rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
 
 /* ═══════════ TOPBAR ═══════════ */
 .topbar{

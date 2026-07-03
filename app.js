@@ -142,15 +142,98 @@ function pwHash(str) {
 
 let STORE;
 try { STORE = JSON.parse(localStorage.getItem(STORE_KEY)) || null; } catch { STORE = null; }
-if (!STORE || !Array.isArray(STORE.users)) STORE = { users: [], sessionId: null };
+if (!STORE || !Array.isArray(STORE.users)) STORE = { users: [] };
 
-/* meta del templo: lista blanca de biblioteca + documentos asignados */
-STORE.meta = STORE.meta || {};
-STORE.meta.customDocs = STORE.meta.customDocs || [];
-if (!STORE.meta.libAccess) STORE.meta.libAccess = {};
+/* meta del templo: lista blanca, secciones ocultas y documentos asignados */
+function ensureMeta() {
+  STORE.meta = STORE.meta || {};
+  STORE.meta.customDocs = STORE.meta.customDocs || [];
+  STORE.meta.libAccess = STORE.meta.libAccess || {};
+  STORE.meta.libHidden = STORE.meta.libHidden || {};
+}
+ensureMeta();
 
-const persist = () => localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
-const currentUser = () => STORE.users.find(u => u.id === STORE.sessionId) || null;
+/* ═══════════ SUPABASE — TEMPLO CENTRALIZADO ═══════════ */
+const SB_URL = 'https://utoqllznqsvdecxeawew.supabase.co/rest/v1';
+const SB_KEY = 'sb_publishable_8r4QVO2k7u8j8JLCjVpzPg_yLw0yuSM';
+const TEMPLE_KEY = 'gadu.temple.v1';
+const SESSION_KEY = 'gadu.session.v1';
+
+let TEMPLE = null;
+try { TEMPLE = JSON.parse(localStorage.getItem(TEMPLE_KEY)); } catch {}
+
+/* la sesión (quién está conectado) es de ESTE dispositivo, nunca se sube */
+let SESSION = null;
+try { SESSION = JSON.parse(localStorage.getItem(SESSION_KEY)); } catch {}
+if (!SESSION) SESSION = { userId: STORE.sessionId || null }; /* migración de versiones previas */
+delete STORE.sessionId;
+const saveSession = () => localStorage.setItem(SESSION_KEY, JSON.stringify(SESSION));
+
+async function sbFetch(path, opts = {}) {
+  const res = await fetch(SB_URL + path, {
+    ...opts,
+    headers: {
+      apikey: SB_KEY,
+      Authorization: 'Bearer ' + SB_KEY,
+      'Content-Type': 'application/json',
+      ...(opts.method && opts.method !== 'GET' ? { Prefer: 'return=representation' } : {}),
+      ...(opts.headers || {}),
+    },
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ''); const err = new Error('sb ' + res.status); err.status = res.status; err.body = t; throw err; }
+  return res.status === 204 ? null : res.json();
+}
+
+const SYNC = { dirty: false, busy: false, offline: false };
+function updateSyncUI() {
+  const el = $('#sync-status');
+  if (!el) return;
+  if (!TEMPLE) { el.textContent = '⌂ sin templo'; return; }
+  el.textContent = `⌂ ${TEMPLE.name} · ${SYNC.busy ? 'guardando…' : SYNC.dirty ? 'cambios locales' : SYNC.offline ? 'sin conexión (local)' : 'sincronizado'}`;
+}
+
+async function pushTemple() {
+  if (!TEMPLE || SYNC.busy) return;
+  SYNC.busy = true; updateSyncUI();
+  try {
+    await sbFetch(`/temples?id=eq.${TEMPLE.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ data: { users: STORE.users, meta: STORE.meta }, updated_at: new Date().toISOString() }),
+    });
+    SYNC.dirty = false; SYNC.offline = false;
+  } catch { SYNC.offline = true; }
+  SYNC.busy = false; updateSyncUI();
+  if (SYNC.dirty) pushSoon(); /* llegaron cambios mientras subíamos */
+}
+const pushSoon = debounce(pushTemple, 1500);
+
+async function pullTemple(silent = true) {
+  if (!TEMPLE || SYNC.dirty || SYNC.busy) return;
+  try {
+    const rows = await sbFetch(`/temples?id=eq.${TEMPLE.id}&select=data`);
+    const remote = rows && rows[0] && rows[0].data;
+    if (remote && Array.isArray(remote.users)) {
+      if (JSON.stringify(remote) !== JSON.stringify({ users: STORE.users, meta: STORE.meta })) {
+        STORE.users = remote.users;
+        STORE.meta = remote.meta || {};
+        ensureMeta();
+        localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+        render();
+        if (!silent) toast('⟳ Templo sincronizado');
+      } else if (!silent) toast('⟳ Todo al día');
+    }
+    SYNC.offline = false;
+  } catch { SYNC.offline = true; if (!silent) toast('Sin conexión — trabajando en local'); }
+  updateSyncUI();
+}
+
+/* guardar = caché local inmediata + subida al templo con pequeño retraso */
+const persist = () => {
+  localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+  if (TEMPLE) { SYNC.dirty = true; pushSoon(); }
+  updateSyncUI();
+};
+const currentUser = () => STORE.users.find(u => u.id === SESSION.userId) || null;
 const getUser = id => STORE.users.find(u => u.id === id);
 const userName = id => (getUser(id) || {}).name || '¿?';
 const rankOf = u => (u && u.status === 'active' && ROLES[u.role]) ? ROLES[u.role].rank : 1;
@@ -174,7 +257,8 @@ function sectionRoles(sec) {
   if (Array.isArray(saved)) return saved;
   return Object.keys(ROLES).filter(k => ROLES[k].rank < 5 && ROLES[k].rank >= sec.minRank);
 }
-const sectionVisibleTo = (sec, u) => canSeeAll(u) || sectionRoles(sec).includes(u.role);
+const sectionHidden = sec => !!(STORE.meta.libHidden && STORE.meta.libHidden[sec.roman]);
+const sectionVisibleTo = (sec, u) => canSeeAll(u) || (!sectionHidden(sec) && sectionRoles(sec).includes(u.role));
 
 function blankData(name) {
   const t = today();
@@ -418,10 +502,12 @@ function go(view) {
 }
 
 function render() {
+  if (!TEMPLE) { renderTempleGate(); return; } /* rol «templo»: obligatorio antes de todo */
   const me = currentUser();
   if (!me) { renderAuth(); return; }
   authEl.hidden = true;
   bindData();
+  updateSyncUI();
 
   document.body.dataset.theme = me.data.prefs.theme;
   const sideVisible = isMobile() ? UI.sideOpen : me.data.prefs.sidebar;
@@ -511,6 +597,84 @@ function showSplash(u) {
   setTimeout(out, 3600);
 }
 
+/* ═══════════ LA PUERTA DEL TEMPLO (crear o unirse) ═══════════ */
+const GATE = { mode: 'join', error: '', busy: false };
+
+function renderTempleGate() {
+  document.body.dataset.theme = document.body.dataset.theme || 'dark';
+  authEl.hidden = false;
+  const create = GATE.mode === 'create';
+  authEl.innerHTML = `
+  <div class="auth-box">
+    <div class="auth-mark">⌂</div>
+    <h1>El Templo</h1>
+    <p class="auth-sub">Todo trabajo necesita un templo. Únete al de tu logia o levanta uno nuevo.</p>
+    <div class="seg" style="margin-bottom:1.2rem">
+      <button class="${!create ? 'on' : ''}" data-gate-mode="join">Unirme a un templo</button>
+      <button class="${create ? 'on' : ''}" data-gate-mode="create">Levantar un templo</button>
+    </div>
+    <div class="field"><label>Nombre del templo</label><input id="tg-name" autocomplete="off" placeholder="p. ej. Logia Luz y Verdad N° 7"></div>
+    <div class="field"><label>Código de acceso</label><input id="tg-code" type="password" placeholder="${create ? 'Elige un código para tu logia' : 'El código que te dio el GADU'}"></div>
+    ${create ? '<div class="field"><label>Repite el código</label><input id="tg-code2" type="password"></div>' : ''}
+    <p class="auth-error">${esc(GATE.error)}</p>
+    <button class="btn gold" id="tg-submit" ${GATE.busy ? 'disabled' : ''}>${GATE.busy ? '∴ Trabajando…' : create ? '⌂ Levantar templo' : '⌂ Entrar al templo'}</button>
+    ${create && STORE.users.length ? `<p class="auth-alt">Lo que ya tienes en este dispositivo (${STORE.users.length} usuario${STORE.users.length === 1 ? '' : 's'}) se conservará como base del nuevo templo.</p>` : ''}
+  </div>`;
+
+  $$('[data-gate-mode]', authEl).forEach(b => b.addEventListener('click', () => { GATE.mode = b.dataset.gateMode; GATE.error = ''; renderTempleGate(); }));
+
+  const submit = async () => {
+    if (GATE.busy) return;
+    const name = $('#tg-name').value.trim();
+    const code = $('#tg-code').value;
+    if (!name) { GATE.error = 'El templo necesita un nombre.'; return renderTempleGate(); }
+    if (code.length < 4) { GATE.error = 'El código debe tener al menos 4 caracteres.'; return renderTempleGate(); }
+    if (create && code !== $('#tg-code2').value) { GATE.error = 'Los códigos no coinciden.'; return renderTempleGate(); }
+    GATE.busy = true; renderTempleGate();
+    try {
+      if (create) {
+        ensureMeta();
+        const rows = await sbFetch('/temples', {
+          method: 'POST',
+          body: JSON.stringify({ name, code, data: { users: STORE.users, meta: STORE.meta } }),
+        });
+        TEMPLE = { id: rows[0].id, name: rows[0].name, code };
+      } else {
+        const rows = await sbFetch(`/temples?name=eq.${encodeURIComponent(name)}&code=eq.${encodeURIComponent(code)}&select=id,name,data`);
+        if (!rows.length) { GATE.busy = false; GATE.error = 'No existe ese templo o el código no es correcto.'; return renderTempleGate(); }
+        TEMPLE = { id: rows[0].id, name: rows[0].name, code };
+        const remote = rows[0].data || {};
+        STORE = { users: Array.isArray(remote.users) ? remote.users : [], meta: remote.meta || {} };
+        ensureMeta();
+        SESSION.userId = null; saveSession();
+        localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+      }
+      localStorage.setItem(TEMPLE_KEY, JSON.stringify(TEMPLE));
+      GATE.busy = false; GATE.error = '';
+      AUTH.mode = 'login'; AUTH.pick = null;
+      render();
+      toast(`⌂ Conectado al templo «${TEMPLE.name}»`);
+    } catch (e) {
+      GATE.busy = false;
+      GATE.error = e.status === 409 ? 'Ya existe un templo con ese nombre.' : 'Sin conexión con el templo. Revisa tu internet e inténtalo de nuevo.';
+      renderTempleGate();
+    }
+  };
+  $('#tg-submit').addEventListener('click', submit);
+  authEl.querySelectorAll('input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); }));
+  $('#tg-name').focus();
+}
+
+function leaveTemple() {
+  if (!confirm(`¿Desconectar este dispositivo del templo «${TEMPLE ? TEMPLE.name : ''}»? Tus datos siguen a salvo en la nube.`)) return;
+  TEMPLE = null;
+  localStorage.removeItem(TEMPLE_KEY);
+  STORE = { users: [] }; ensureMeta();
+  localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+  SESSION.userId = null; saveSession();
+  render();
+}
+
 /* ═══════════ PANTALLA DE ACCESO ═══════════ */
 const AUTH = { mode: 'login', pick: null, error: '' };
 
@@ -545,7 +709,7 @@ function renderAuth() {
       ensureHabits(data);
       const u = { id: uid(), name, pass: pwHash(p1), role: 'gadu', status: 'active', requestedRole: null, created: today(), lastActive: today(), data };
       STORE.users.push(u);
-      STORE.sessionId = u.id;
+      SESSION.userId = u.id; saveSession();
       AUTH.error = '';
       persist();
       UI.view = 'dashboard';
@@ -584,7 +748,7 @@ function renderAuth() {
       if (p1 !== p2) { AUTH.error = 'Las contraseñas no coinciden.'; return renderAuth(); }
       const u = { id: uid(), name, pass: pwHash(p1), role: 'aprendiz', status: 'pending', requestedRole: $('#au-role').value, created: today(), lastActive: today(), data: blankData(name) };
       STORE.users.push(u);
-      STORE.sessionId = u.id;
+      SESSION.userId = u.id; saveSession();
       AUTH.error = ''; AUTH.mode = 'login';
       persist();
       UI.view = 'dashboard';
@@ -605,7 +769,7 @@ function renderAuth() {
   <div class="auth-box">
     <div class="auth-mark">∴</div>
     <h1>G∴A∴D∴U∴</h1>
-    <p class="auth-sub">¿Quién llama a las puertas del templo?</p>
+    <p class="auth-sub">Templo «${esc(TEMPLE ? TEMPLE.name : '')}» — ¿quién llama a sus puertas?</p>
     <div class="user-grid">
       ${STORE.users.map(u => `
         <div class="user-pick${u.id === AUTH.pick ? ' on' : ''}${u.status === 'pending' ? ' pending' : ''}" data-pick="${u.id}">
@@ -618,6 +782,7 @@ function renderAuth() {
       ${err}
       <button class="btn gold" id="au-submit">Entrar al taller</button>` : `${err}`}
     <p class="auth-alt">¿Nuevo en el templo? <button data-auth="register">Solicitar ingreso</button></p>
+    <p class="auth-alt">⌂ <button data-auth="leave">Cambiar de templo</button></p>
   </div>`;
   $$('[data-pick]', authEl).forEach(el => el.addEventListener('click', () => { AUTH.pick = el.dataset.pick; AUTH.error = ''; renderAuth(); }));
   const btn = $('#au-submit');
@@ -626,7 +791,7 @@ function renderAuth() {
       const u = getUser(AUTH.pick);
       if (!u) return;
       if (pwHash($('#au-pass').value) !== u.pass) { AUTH.error = 'La palabra de paso no es correcta.'; return renderAuth(); }
-      STORE.sessionId = u.id;
+      SESSION.userId = u.id; saveSession();
       AUTH.error = ''; AUTH.pick = null;
       persist();
       UI.view = 'dashboard'; UI.viewAs = null; UI.noteId = null;
@@ -638,6 +803,8 @@ function renderAuth() {
     $('#au-pass').focus();
   }
   $('[data-auth="register"]').addEventListener('click', () => { AUTH.mode = 'register'; AUTH.error = ''; renderAuth(); });
+  const leave = $('[data-auth="leave"]');
+  if (leave) leave.addEventListener('click', leaveTemple);
 }
 
 /* ═══════════ VISTA: TABLERO ═══════════ */
@@ -1157,11 +1324,15 @@ VIEWS.library = () => {
       <div class="lib-locked-card">Este conocimiento se revelará al avanzar de grado.<br>Continúa el trabajo sobre la piedra.</div>
     </section>`;
     const read = sec.books.filter(b => DB.libStatus[b.id] === 'leido').length;
+    const hidden = sectionHidden(sec);
     return `
-    <section class="lib-section">
+    <section class="lib-section${hidden ? ' locked' : ''}">
       <div class="lib-sec-head">
         <span class="lib-roman">${sec.roman}</span>
         <h2 class="lib-sec-title">${sec.title}</h2>
+        ${me.role === 'gadu'
+          ? `<button class="chip${hidden ? ' on' : ''}" data-action="lib-hide" data-roman="${sec.roman}" title="${hidden ? 'Nadie más que el Or∴ la ve. Pulsa para mostrarla.' : 'Ocultar esta sección para todos los roles.'}">${hidden ? '⊘ Oculta para todos' : '👁 Visible'}</button>`
+          : hidden ? '<span class="role-badge pending">⊘ oculta para la logia</span>' : ''}
         <div class="lib-sec-bar"><div class="progress-rail"><div class="progress-fill" style="width:${sec.books.length ? Math.round(read / sec.books.length * 100) : 0}%"></div></div></div>
       </div>
       <p class="lib-sec-desc">${sec.desc}</p>
@@ -1293,22 +1464,25 @@ VIEWS.admin = () => {
             <span class="u-meta"><b>${s.title}</b></span>
             ${['aprendiz','companero','vig2','vig1'].map(r => `
               <button class="chip${sectionRoles(s).includes(r) ? ' on' : ''}" data-action="lib-acc" data-roman="${s.roman}" data-role="${r}" title="${ROLES[r].label}">${ROLES[r].short}</button>`).join('')}
+            <button class="chip${sectionHidden(s) ? ' on' : ''}" data-action="lib-hide" data-roman="${s.roman}" title="Ocultar la sección para todos los roles">⊘ Todos</button>
           </div>`).join('')}
       </div>
     </section>
 
     <section class="panel">
-      <div class="panel-head"><span class="panel-title">▲ Respaldo del templo (solo GADU)</span></div>
+      <div class="panel-head"><span class="panel-title">⌂ Templo en la nube (solo GADU)</span></div>
       <div class="panel-body">
         <p style="font-family:var(--font-serif);font-style:italic;color:var(--muted);margin-bottom:.9rem">
-          Los datos viven en el navegador de cada dispositivo: cada equipo o teléfono guarda su propio templo.
-          Exporta el respaldo completo (todos los talleres) y guárdalo en la carpeta de Google Drive del templo;
-          con «Restaurar respaldo» lo revives en cualquier otro dispositivo.
+          El templo «${esc(TEMPLE ? TEMPLE.name : '')}» vive centralizado en Supabase: los usuarios y talleres se
+          comparten entre todos los dispositivos conectados. Los cambios se suben solos; usa «Sincronizar» para
+          traer al instante lo que hayan hecho los demás. El respaldo JSON sigue disponible como custodia en Drive.
         </p>
         <div style="display:flex;gap:.7rem;flex-wrap:wrap">
-          <button class="btn gold" data-action="export-all">⇩ Exportar templo completo</button>
+          <button class="btn gold" data-action="sync">⟳ Sincronizar ahora</button>
+          <button class="btn" data-action="export-all">⇩ Exportar respaldo</button>
           <button class="btn" data-action="import">⇪ Restaurar respaldo</button>
-          <a class="btn" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">▲ Abrir carpeta de Drive</a>
+          <a class="btn" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">▲ Abrir Drive</a>
+          <button class="btn ghost" data-action="leave-temple">⌂ Cambiar de templo</button>
         </div>
       </div>
     </section>` : ''}
@@ -1746,10 +1920,10 @@ const ACTIONS = {
     openPalette();
   },
   logout: () => {
-    STORE.sessionId = null;
+    SESSION.userId = null; saveSession();
     UI.viewAs = null; UI.noteId = null; UI.view = 'dashboard';
     AUTH.mode = 'login'; AUTH.pick = null; AUTH.error = '';
-    persist(); render();
+    render();
   },
   help: () => openModal(`
     <div class="modal"><div class="modal-head"><h3>∴ Atajos</h3><button class="icon-btn" data-action="close-modal">✕</button></div>
@@ -1782,6 +1956,11 @@ const ACTIONS = {
     if (currentUser().role !== 'gadu') { toast('Solo el GADU custodia los respaldos'); return; }
     $('#import-file').click();
   },
+  sync: async () => {
+    if (SYNC.dirty) { await pushTemple(); }
+    await pullTemple(false);
+  },
+  'leave-temple': () => leaveTemple(),
 
   /* monitoreo y encomiendas */
   'assign-work': () => openAssignModal(),
@@ -1808,6 +1987,12 @@ const ACTIONS = {
     if (i >= 0) cur.splice(i, 1); else cur.push(d.role);
     STORE.meta.libAccess[sec.roman] = cur;
     save(); render();
+  },
+  'lib-hide': d => {
+    if (currentUser().role !== 'gadu') { toast('Solo el GADU designa la visibilidad'); return; }
+    STORE.meta.libHidden[d.roman] = !STORE.meta.libHidden[d.roman];
+    save(); render();
+    toast(STORE.meta.libHidden[d.roman] ? `⊘ Sección ${d.roman} oculta para toda la logia` : `👁 Sección ${d.roman} visible de nuevo`);
   },
   'doc-del': d => {
     const doc = STORE.meta.customDocs.find(x => x.id === d.id); if (!doc) return;
@@ -1945,8 +2130,9 @@ $('#import-file').addEventListener('change', e => {
         /* respaldo completo del templo */
         if (!canSeeAll(currentUser())) { toast('Solo el administrador puede restaurar el templo completo'); return; }
         if (!confirm('Esto reemplazará TODOS los usuarios y talleres por el respaldo. ¿Continuar?')) return;
-        STORE = data;
-        STORE.sessionId = null;
+        STORE = { users: data.users, meta: data.meta || {} };
+        ensureMeta();
+        SESSION.userId = null; saveSession();
         persist();
         UI.viewAs = null;
         render();
@@ -2018,5 +2204,10 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 /* re-render al cruzar el punto de quiebre móvil/escritorio */
 window.addEventListener('resize', debounce(() => { if (currentUser()) render(); }, 250));
 
+/* sincronización con el templo: al volver a la pestaña o recuperar conexión */
+window.addEventListener('focus', () => { if (TEMPLE) pullTemple(); });
+window.addEventListener('online', () => { if (TEMPLE) (SYNC.dirty ? pushTemple() : pullTemple()); });
+
 render();
 if (currentUser()) showSplash(currentUser());
+if (TEMPLE) pullTemple();

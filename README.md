@@ -18,9 +18,13 @@ El proyecto está preparado para vivir 100% en GitHub Pages (incluye `.nojekyll`
 
 Al servirse por HTTPS, GADU funciona **offline** tras la primera visita y puede **instalarse como app** (menú del navegador → "Instalar" / "Añadir a pantalla de inicio").
 
-### Importante: los datos viven en cada dispositivo
+### Backend: templo centralizado en Supabase
 
-GitHub Pages solo sirve los archivos; no hay servidor de datos. Cada navegador/dispositivo guarda su propio templo en `localStorage`. Para mover o compartir el estado entre equipos usa **Administración → Exportar templo completo** y guarda el JSON en la carpeta de Google Drive; en el otro dispositivo, **Restaurar respaldo**.
+Los usuarios y talleres viven centralizados en Supabase (tabla `temples`): al abrir la app se **crea o se une a un templo** con nombre + código de acceso, y todos los dispositivos conectados al mismo templo comparten los mismos datos. Los cambios se suben solos (con caché local para trabajar sin conexión) y se traen al volver a la pestaña, recuperar internet o con «⟳ Sincronizar ahora» en Administración.
+
+**Configuración (una sola vez):** ejecutar [supabase-setup.sql](supabase-setup.sql) en el SQL Editor del proyecto de Supabase. La URL y la clave publicable están en `app.js`; la clave publicable está diseñada para ser pública y la tabla queda protegida por políticas RLS.
+
+**Nota honesta de seguridad:** el acceso a cada templo se controla con su nombre + código; las contraseñas de usuario van con hash. Es un nivel adecuado para una logia, no una bóveda bancaria — quien tenga la clave publicable puede listar las filas de la tabla. Para un blindaje mayor, el siguiente paso sería Supabase Auth.
 
 ## Uso local
 

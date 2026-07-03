@@ -1,7 +1,7 @@
 /* GADU ∴ Service Worker — funcionamiento offline en GitHub Pages */
 'use strict';
 
-const CACHE = 'gadu-v1';
+const CACHE = 'gadu-v2';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
@@ -19,6 +19,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
+
+  /* Supabase: siempre red directa, jamás caché (datos vivos del templo) */
+  if (url.hostname.endsWith('.supabase.co')) return;
 
   if (url.origin === location.origin) {
     /* app shell: red primero (para recibir actualizaciones), caché si no hay conexión */
