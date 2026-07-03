@@ -624,6 +624,40 @@ hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
 .user-pick span{font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .user-pick.pending .u-avatar{background:var(--bg-2);color:var(--muted);border:1px dashed var(--gold-dim)}
 
+/* ═══════════ ANTESALA (splash de bienvenida) ═══════════ */
+.splash{
+  position:fixed;inset:0;z-index:150;display:flex;align-items:center;justify-content:center;
+  background:
+    radial-gradient(900px 480px at 50% -10%, rgba(201,163,92,.14), transparent 60%),
+    radial-gradient(700px 500px at 85% 110%, rgba(201,163,92,.06), transparent 60%),
+    var(--bg);
+  cursor:pointer;text-align:center;padding:1.5rem;
+  animation:splashIn .45s ease both;
+}
+.splash.out{animation:splashOut .75s ease both;pointer-events:none}
+@keyframes splashIn{from{opacity:0}to{opacity:1}}
+@keyframes splashOut{to{opacity:0}}
+.splash-inner{max-width:560px;display:flex;flex-direction:column;align-items:center;gap:.9rem}
+.splash-inner > *{animation:rise .7s cubic-bezier(.22,.9,.3,1) both}
+.splash-inner > *:nth-child(2){animation-delay:.25s}
+.splash-inner > *:nth-child(3){animation-delay:.5s}
+.splash-inner > *:nth-child(4){animation-delay:.75s}
+.splash-inner > *:nth-child(5){animation-delay:1s}
+.splash-inner > *:nth-child(6){animation-delay:1.6s}
+.splash-mark{
+  font-size:4.2rem;line-height:1;color:var(--gold);
+  text-shadow:0 0 34px rgba(201,163,92,.6);animation:breathe 4s ease-in-out infinite !important;
+}
+.splash-name{font-family:var(--font-display);font-weight:600;font-size:2rem;letter-spacing:.12em}
+.splash-role{font-family:var(--font-serif);font-style:italic;font-size:1.12rem;color:var(--gold-hi);line-height:1.6}
+.splash-rule{width:120px}
+.splash-phrase{font-family:var(--font-serif);font-style:italic;font-size:1.05rem;color:var(--muted);line-height:1.65}
+.splash-hint{
+  font-family:var(--font-display);font-size:.62rem;letter-spacing:.4em;text-transform:uppercase;
+  color:var(--faint);animation:hintPulse 1.6s ease-in-out infinite !important;
+}
+@keyframes hintPulse{0%,100%{opacity:.4}50%{opacity:1}}
+
 /* ═══════════ CHIP DE USUARIO (sidebar) ═══════════ */
 .user-chip{
   display:flex;align-items:center;gap:.6rem;margin:.6rem .4rem 0;padding:.55rem .6rem;

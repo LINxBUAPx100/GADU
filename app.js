@@ -522,7 +522,8 @@ function renderAuth() {
       persist();
       UI.view = 'dashboard';
       render();
-      toast(`∴ Salud, ${name}. El templo está fundado.`);
+      showSplash(u);
+      toast(`∴ El templo está fundado.`);
     };
     $('#au-submit').addEventListener('click', submit);
     authEl.querySelectorAll('input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); }));
@@ -560,6 +561,7 @@ function renderAuth() {
       persist();
       UI.view = 'dashboard';
       render();
+      showSplash(u);
       toast('Solicitud enviada. Tu taller ya está abierto.');
     };
     $('#au-submit').addEventListener('click', submit);
@@ -601,7 +603,7 @@ function renderAuth() {
       persist();
       UI.view = 'dashboard'; UI.viewAs = null; UI.noteId = null;
       render();
-      toast(`∴ Salud, ${u.name}.`);
+      showSplash(u);
     };
     btn.addEventListener('click', submit);
     $('#au-pass').addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
@@ -1945,3 +1947,4 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 
 render();
+if (currentUser()) showSplash(currentUser());
