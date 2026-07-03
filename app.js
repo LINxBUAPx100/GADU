@@ -349,12 +349,17 @@ const backlinksOf = note => DB.notes.filter(n => n.id !== note.id && new RegExp(
 const driveSearch = q => `https://drive.google.com/drive/search?q=${encodeURIComponent(q)}`;
 
 /* ─── recurrencia ─── */
-const REPEAT_LABELS = { none:'No se repite', daily:'Cada día', weekly:'Cada semana', biweekly:'Cada 2 semanas', monthly:'Cada mes' };
+const REPEAT_LABELS = {
+  none:'No se repite', daily:'Cada día', weekly:'Cada semana', biweekly:'Cada 2 semanas',
+  monthly:'Cada mes (mismo número de día)', monthlyDow:'Cada mes (mismo día y semana, ej. 1er viernes)',
+};
+const TASK_REPEAT_LABELS = { none:'No se repite', daily:'Cada día', weekly:'Cada semana', biweekly:'Cada 2 semanas', monthly:'Cada mes' };
 const isRepeating = ev => ev.repeat && ev.repeat !== 'none';
 function occursOn(ev, dateStr) {
   if ((ev.skip || []).includes(dateStr)) return false;
   if (ev.date === dateStr) return true;
   if (!isRepeating(ev) || dateStr < ev.date) return false;
+  if (ev.until && dateStr > ev.until) return false;
   const a = parseYMD(ev.date), b = parseYMD(dateStr);
   if (ev.repeat === 'daily') return true;
   if (ev.repeat === 'weekly' || ev.repeat === 'biweekly') {
@@ -363,7 +368,20 @@ function occursOn(ev, dateStr) {
     return Math.round((b - a) / (7 * 86400000)) % 2 === 0;
   }
   if (ev.repeat === 'monthly') return a.getDate() === b.getDate();
+  if (ev.repeat === 'monthlyDow') {
+    if (a.getDay() !== b.getDay()) return false;
+    return Math.ceil(a.getDate() / 7) === Math.ceil(b.getDate() / 7);
+  }
   return false;
+}
+/* siguiente vencimiento de una tarea recurrente */
+function nextDue(due, repeat) {
+  const base = due || today();
+  if (repeat === 'daily') return addDays(base, 1);
+  if (repeat === 'weekly') return addDays(base, 7);
+  if (repeat === 'biweekly') return addDays(base, 14);
+  if (repeat === 'monthly') { const d = parseYMD(base); d.setMonth(d.getMonth() + 1); return ymd(d); }
+  return base;
 }
 const eventsOn = dateStr => DB.events.filter(e => occursOn(e, dateStr));
 const repGlyph = ev => isRepeating(ev) ? ' <span class="rep" title="Se repite">↻</span>' : '';
@@ -854,8 +872,9 @@ function taskCard(t) {
       <span class="tc-title${t.status === 'done' ? ' done' : ''}">${esc(t.title)}</span>
       <span class="dot ${t.priority}" title="Prioridad ${t.priority}"></span>
     </div>
-    ${(t.due || t.project || t.subtasks.length || t.assignedBy) ? `<div class="tc-meta">
+    ${(t.due || t.project || t.subtasks.length || t.assignedBy || (t.repeat && t.repeat !== 'none')) ? `<div class="tc-meta">
       ${taskDueBadge(t)}
+      ${(t.repeat && t.repeat !== 'none') ? '<span class="rep" title="Tarea recurrente">↻</span>' : ''}
       ${t.subtasks.length ? `<span class="tc-sub">☰ ${subDone}/${t.subtasks.length}</span>` : ''}
       ${t.project ? `<span class="tc-proj">${esc(t.project)}</span>` : ''}
       ${t.assignedBy ? `<span class="tc-from" title="Trabajo encomendado">☩ de ${esc(userName(t.assignedBy))}</span>` : ''}
@@ -1485,6 +1504,11 @@ function openTaskModal(task) {
           <datalist id="tm-projects">${[...new Set(DB.tasks.map(x => x.project).filter(Boolean))].map(p => `<option value="${esc(p)}">`).join('')}</datalist>
         </div>
       </div>
+      <div class="field"><label>↻ Repetición — al completarla se agenda la siguiente</label>
+        <select id="tm-repeat">
+          ${Object.entries(TASK_REPEAT_LABELS).map(([k, l]) => `<option value="${k}"${(t.repeat || 'none') === k ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
       ${targets.length ? `
       <div class="field"><label>☩ Encomendar a</label>
         <select id="tm-assign">
@@ -1520,6 +1544,7 @@ function openTaskModal(task) {
       title: $('#tm-title').value.trim() || 'Tarea sin título',
       status: $('#tm-status').value, priority: $('#tm-priority').value,
       due: $('#tm-due').value, project: $('#tm-project').value.trim(), subtasks,
+      repeat: $('#tm-repeat').value,
     });
     $('#tm-save').addEventListener('click', () => {
       const v = collect();
@@ -1566,10 +1591,13 @@ function openEventModal(preset = {}, existing = null) {
         <div class="field"><label>Hora</label><input id="em-start" type="time" value="${e0.start}"></div>
         <div class="field"><label>Duración (min)</label><input id="em-dur" type="number" min="15" step="15" value="${e0.dur}"></div>
       </div>
-      <div class="field"><label>↻ Repetición</label>
-        <select id="em-repeat">
-          ${Object.entries(REPEAT_LABELS).map(([k, l]) => `<option value="${k}"${(e0.repeat || 'none') === k ? ' selected' : ''}>${l}</option>`).join('')}
-        </select>
+      <div class="field-row">
+        <div class="field" style="flex:2"><label>↻ Repetición</label>
+          <select id="em-repeat">
+            ${Object.entries(REPEAT_LABELS).map(([k, l]) => `<option value="${k}"${(e0.repeat || 'none') === k ? ' selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Termina (opcional)</label><input id="em-until" type="date" value="${e0.until || ''}"></div>
       </div>
       ${e0.taskId && getTask(e0.taskId) ? `<p style="font-size:.85rem;color:var(--muted)">⚒ Vinculado a la tarea «${esc(getTask(e0.taskId).title)}»</p>` : ''}
       <div class="modal-foot">
@@ -1587,6 +1615,7 @@ function openEventModal(preset = {}, existing = null) {
         start: $('#em-start').value || '19:00',
         dur: Math.max(15, +$('#em-dur').value || 60),
         repeat: $('#em-repeat').value,
+        until: $('#em-until').value || '',
       };
       if (existing) Object.assign(existing, v);
       else DB.events.push({ id: uid(), taskId: e0.taskId, skip: [], ...v });
@@ -1827,6 +1856,20 @@ const ACTIONS = {
   'edit-task': d => openTaskModal(getTask(d.id)),
   'toggle-task': d => {
     const t = getTask(d.id);
+    /* tarea recurrente: al completarla se archiva la cumplida y se agenda la siguiente */
+    if (t.status !== 'done' && t.repeat && t.repeat !== 'none') {
+      DB.tasks.push({
+        ...t, id: uid(), repeat: 'none', status: 'done', review: t.review || null,
+        subtasks: t.subtasks.map(s => ({...s, done: true})),
+      });
+      t.due = nextDue(t.due, t.repeat);
+      t.status = 'todo';
+      t.subtasks = t.subtasks.map(s => ({...s, done: false}));
+      t.review = null;
+      save(); render();
+      toast(`∴ Cumplida · próxima: ${fmtShort(t.due)} ↻`);
+      return;
+    }
     t.status = t.status === 'done' ? 'todo' : 'done';
     save(); render();
     if (t.status === 'done') toast('∴ Trabajo terminado');
