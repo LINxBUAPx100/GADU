@@ -22,6 +22,7 @@ const fmtLong = s => new Intl.DateTimeFormat('es-ES', {weekday:'long', day:'nume
 const fmtShort = s => new Intl.DateTimeFormat('es-ES', {day:'numeric', month:'short'}).format(parseYMD(s));
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+const isMobile = () => window.matchMedia('(max-width: 880px)').matches;
 
 /* ═══════════ BIBLIOTECA (contenido curado) ═══════════ */
 const LIBRARY = {
@@ -277,6 +278,7 @@ const UI = {
   calMode:'month', calCursor: today(),
   palSel:0, palItems:[],
   viewAs: null,
+  sideOpen: false, /* en móvil la barra es un panel transitorio: inicia oculta */
 };
 
 /* ═══════════ MARKDOWN ═══════════ */
@@ -406,6 +408,7 @@ function go(view) {
   if (view === 'admin' && !canSeeAll(currentUser())) { toast('Reservado al Or∴ de administración'); return; }
   if (view === 'monitor' && !canMonitor(currentUser())) { toast('Reservado a los Vigilantes y al Or∴'); return; }
   UI.view = view;
+  if (isMobile()) UI.sideOpen = false; /* navegar cierra el menú en móvil */
   render();
 }
 
@@ -416,7 +419,9 @@ function render() {
   bindData();
 
   document.body.dataset.theme = me.data.prefs.theme;
-  $('#app').classList.toggle('side-hidden', !me.data.prefs.sidebar);
+  const sideVisible = isMobile() ? UI.sideOpen : me.data.prefs.sidebar;
+  $('#app').classList.toggle('side-hidden', !sideVisible);
+  $('#side-veil').hidden = !(isMobile() && UI.sideOpen);
   $('#crumb').textContent = VIEW_NAMES[UI.view];
   $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.nav === UI.view));
   $('#nav-admin').hidden = !canSeeAll(me);
@@ -1726,9 +1731,15 @@ function toast(msg) {
 /* ═══════════ ACCIONES (delegación) ═══════════ */
 const ACTIONS = {
   go: d => go(d.view),
-  sidebar: () => { const p = currentUser().data.prefs; p.sidebar = !p.sidebar; save(); render(); },
+  sidebar: () => {
+    if (isMobile()) { UI.sideOpen = !UI.sideOpen; render(); return; }
+    const p = currentUser().data.prefs; p.sidebar = !p.sidebar; save(); render();
+  },
   theme: () => { const p = currentUser().data.prefs; p.theme = p.theme === 'dark' ? 'light' : 'dark'; save(); render(); toast(p.theme === 'dark' ? 'Cámara oscura' : 'Pergamino claro'); },
-  palette: () => openPalette(),
+  palette: () => {
+    if (isMobile() && UI.sideOpen) { UI.sideOpen = false; render(); }
+    openPalette();
+  },
   logout: () => {
     STORE.sessionId = null;
     UI.viewAs = null; UI.noteId = null; UI.view = 'dashboard';
@@ -1988,6 +1999,9 @@ window.addEventListener('hashchange', () => { if (HASH_VIEWS[location.hash] && c
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
+
+/* re-render al cruzar el punto de quiebre móvil/escritorio */
+window.addEventListener('resize', debounce(() => { if (currentUser()) render(); }, 250));
 
 render();
 if (currentUser()) showSplash(currentUser());

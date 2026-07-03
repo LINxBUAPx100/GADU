@@ -112,6 +112,16 @@ hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
   position:relative;z-index:5;
 }
 .app.side-hidden .sidebar{margin-left:-232px}
+.side-close{
+  display:none;position:absolute;top:.9rem;right:.7rem;width:34px;height:34px;
+  border-radius:8px;color:var(--muted);font-size:1rem;place-items:center;
+  border:1px solid var(--line-soft);z-index:6;
+}
+.side-close:hover{color:var(--gold);border-color:var(--gold-dim)}
+.side-veil{
+  position:fixed;inset:0;z-index:4;background:rgba(6,5,3,.55);backdrop-filter:blur(3px);
+  animation:splashIn .25s ease both;
+}
 .brand{display:flex;align-items:baseline;gap:.6rem;cursor:pointer;padding:.2rem .5rem .9rem;user-select:none}
 .brand-mark{
   font-size:2rem;color:var(--gold);line-height:1;
@@ -731,12 +741,25 @@ hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
   .week-wrap{grid-template-columns:1fr}
 }
 @media (max-width:880px){
-  .sidebar{position:fixed;inset:0 auto 0 0;height:100%;box-shadow:var(--shadow)}
+  .sidebar{position:fixed;inset:0 auto 0 0;height:100%;box-shadow:var(--shadow);overflow-y:auto}
   .app.side-hidden .sidebar{margin-left:-232px}
+  .side-close{display:grid}
   .notes-wrap{grid-template-columns:1fr;height:auto}
   .notes-list{max-height:320px}
   .kanban{grid-template-columns:1fr}
   .view{padding:1.2rem 1rem 3rem}
   .search-pill span + kbd, .top-date{display:none}
   .book-grid{grid-template-columns:1fr}
+  .capture{flex-wrap:wrap;padding:.55rem .8rem}
+  .capture input{min-width:0;flex:1 1 100%}
+  .capture-btns{flex:1;justify-content:flex-end}
+  .dash-hero .watermark{font-size:7rem;right:-1rem}
+  .tasks-toolbar,.cal-toolbar{gap:.5rem}
+  .cal-month-label{min-width:0;font-size:1.05rem}
+  .day-cell{min-height:64px;padding:.25rem .3rem}
+  .cal-chip{font-size:.62rem}
+  .admin-row{gap:.55rem}
+  .mon-bar{width:100%}
+  .modal-veil{padding:.8rem}
+  .field-row{flex-wrap:wrap}
 }
