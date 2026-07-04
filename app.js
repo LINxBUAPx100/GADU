@@ -152,6 +152,7 @@ function ensureMeta() {
   STORE.meta.libHidden = STORE.meta.libHidden || {};
   STORE.meta.removedUsers = STORE.meta.removedUsers || [];
   STORE.meta.removedDocs = STORE.meta.removedDocs || [];
+  STORE.meta.templeBooks = STORE.meta.templeBooks || []; /* biblioteca propia del templo */
 }
 ensureMeta();
 
@@ -219,12 +220,19 @@ function mergeMeta(local, remote) {
   const docs = new Map();
   (remote.customDocs || []).forEach(d => docs.set(d.id, d));
   (local.customDocs || []).forEach(d => docs.set(d.id, d));
+  const books = new Map();
+  (remote.templeBooks || []).forEach(b => books.set(b.id, b));
+  (local.templeBooks || []).forEach(b => books.set(b.id, b));
+  const removedDocs = [...new Set([...(remote.removedDocs || []), ...(local.removedDocs || [])])];
+  const dead = new Set(removedDocs);
   return {
     libAccess: { ...(remote.libAccess || {}), ...(local.libAccess || {}) },
     libHidden: { ...(remote.libHidden || {}), ...(local.libHidden || {}) },
-    customDocs: [...docs.values()],
+    customDocs: [...docs.values()].filter(d => !dead.has(d.id)),
+    templeBooks: [...books.values()].filter(b => !dead.has(b.id)),
     removedUsers: [...new Set([...(remote.removedUsers || []), ...(local.removedUsers || [])])],
-    removedDocs: [...new Set([...(remote.removedDocs || []), ...(local.removedDocs || [])])],
+    removedDocs,
+    deleted: local.deleted || remote.deleted || undefined,
   };
 }
 /* fusiona lo remoto con lo local: une usuarios por id (nunca pisa a nadie)
@@ -699,7 +707,9 @@ function renderTempleGate() {
         TEMPLE = { id: rows[0].id, name: rows[0].name, code };
       } else {
         const rows = await sbFetch(`/temples?name=eq.${encodeURIComponent(name)}&code=eq.${encodeURIComponent(code)}&select=id,name,data`);
-        if (!rows.length) { GATE.busy = false; GATE.error = 'No existe ese templo o el código no es correcto.'; return renderTempleGate(); }
+        const alive = rows.filter(r => !(r.data && r.data.meta && r.data.meta.deleted));
+        if (!alive.length) { GATE.busy = false; GATE.error = 'No existe ese templo o el código no es correcto.'; return renderTempleGate(); }
+        rows.length = 0; rows.push(alive[0]);
         TEMPLE = { id: rows[0].id, name: rows[0].name, code };
         const remote = rows[0].data || {};
         STORE = { users: Array.isArray(remote.users) ? remote.users : [], meta: remote.meta || {} };
@@ -1360,6 +1370,8 @@ VIEWS.library = () => {
   const seeAll = canSeeAll(me);
   const prog = libProgress();
   const docs = STORE.meta.customDocs.filter(d => seeAll || d.addedBy === me.id || d.roles.includes(me.role));
+  const canManageTempleLib = rankOf(me) >= 5; /* GADU y Venerable */
+  const templeBooks = STORE.meta.templeBooks || [];
   return `
   <div class="lib-hero">
     <p class="epigraph">Camino de estudio · Tradición masónica</p>
@@ -1369,6 +1381,12 @@ VIEWS.library = () => {
       <a class="btn gold" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">▲ Abrir carpeta en Google Drive</a>
       <span class="lib-progress-note">${prog.read} de ${prog.total} obras leídas · ${prog.pct}% del camino</span>
     </div>
+  </div>
+
+  <div class="lib-divider">
+    <span class="lib-divider-mark">✧</span>
+    <h2 class="lib-divider-title">Biblioteca Central del Gran Oriente</h2>
+    <p class="lib-divider-sub">Camino de estudio compartido por todos los templos.</p>
   </div>
 
   ${LIBRARY.sections.map(sec => {
@@ -1414,6 +1432,32 @@ VIEWS.library = () => {
       </div>
     </section>`;
   }).join('')}
+
+  <div class="lib-divider">
+    <span class="lib-divider-mark">⌂</span>
+    <h2 class="lib-divider-title">Biblioteca del Templo${TEMPLE ? ` «${esc(TEMPLE.name)}»` : ''}</h2>
+    <p class="lib-divider-sub">Obras propias de esta logia, custodiadas solo por sus miembros.</p>
+    ${canManageTempleLib ? '<button class="btn gold" data-action="temple-book-add">＋ Añadir obra</button>' : ''}
+  </div>
+
+  <section class="lib-section">
+    ${templeBooks.length ? `<div class="book-grid">
+      ${templeBooks.map(b => `
+      <article class="book">
+        <span class="b-author">${esc(b.author) || '—'} · añadida por ${esc(userName(b.addedBy))}</span>
+        <h3 class="b-title">${b.url
+          ? `<a href="${esc(b.url)}" target="_blank" rel="noopener" title="Abrir la obra">${esc(b.title)}<span class="ext"> ↗</span></a>`
+          : b.dataUrl
+            ? `<a href="${b.dataUrl}" download="${esc(b.fileName || 'obra')}" title="Descargar la obra">${esc(b.title)}<span class="ext"> ⇩</span></a>`
+            : esc(b.title)}</h3>
+        <p class="b-desc">${esc(b.desc) || '—'}</p>
+        <div class="b-foot">
+          ${b.url || b.dataUrl ? `<a class="b-link" href="${b.url || b.dataUrl}" ${b.url ? 'target="_blank" rel="noopener"' : `download="${esc(b.fileName || 'obra')}"`}>▲ ${b.url ? 'Abrir' : 'Descargar'}</a>` : ''}
+          ${(canManageTempleLib || b.addedBy === me.id) ? `<button class="b-link" data-action="temple-book-del" data-id="${b.id}" style="background:none;border:none;cursor:pointer;margin-left:auto">✕ Retirar</button>` : ''}
+        </div>
+      </article>`).join('')}
+    </div>` : `<div class="lib-locked-card" style="border-style:solid">Esta logia aún no tiene obras propias.${canManageTempleLib ? ' Añade la primera con «＋ Añadir obra».' : ''}</div>`}
+  </section>
 
   ${docs.length ? `
   <section class="lib-section">
@@ -1563,7 +1607,8 @@ async function loadTemplesDir() {
   const box = $('#temples-dir');
   if (!box) return;
   try {
-    TEMPLES_DIR = await sbFetch('/temples?select=id,name,code,updated_at,data&order=updated_at.desc');
+    const all = await sbFetch('/temples?select=id,name,code,updated_at,data&order=updated_at.desc');
+    TEMPLES_DIR = all.filter(t => !(t.data && t.data.meta && t.data.meta.deleted)); /* ocultar demolidos */
     box.innerHTML = TEMPLES_DIR.map(t => {
       const users = (t.data && t.data.users) || [];
       const pending = users.filter(u => u.status === 'pending').length;
@@ -1627,6 +1672,41 @@ async function reassignUser(userId, fromId, toId) {
     render();
     loadTemplesDir();
   } catch { toast('No se pudo reasignar (sin conexión)'); }
+}
+
+function openTempleBookModal() {
+  const me = currentUser();
+  openModal(`
+  <div class="modal">
+    <div class="modal-head"><h3>⌂ Añadir obra a la biblioteca del templo</h3>
+      <button class="icon-btn" data-action="close-modal">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Título</label><input id="tb-title" placeholder="Título de la obra"></div>
+      <div class="field"><label>Autor</label><input id="tb-author" placeholder="Autor (opcional)"></div>
+      <div class="field"><label>Descripción</label><textarea id="tb-desc" rows="2" placeholder="De qué trata y por qué estudiarla"></textarea></div>
+      <div class="field"><label>Enlace (Drive, web…)</label><input id="tb-url" type="url" placeholder="https://drive.google.com/…"></div>
+      <div class="field"><label>… o archivo pequeño (máx. 1,5 MB)</label><input id="tb-file" type="file"></div>
+      <div class="modal-foot">
+        <button class="btn" data-action="close-modal">Cancelar</button>
+        <button class="btn gold" id="tb-save">Añadir</button>
+      </div>
+    </div>
+  </div>`, () => {
+    $('#tb-save').addEventListener('click', () => {
+      const title = $('#tb-title').value.trim();
+      if (!title) { toast('La obra necesita un título'); $('#tb-title').focus(); return; }
+      const base = { id: uid(), title, author: $('#tb-author').value.trim(), desc: $('#tb-desc').value.trim(), url: $('#tb-url').value.trim(), dataUrl: '', fileName: '', addedBy: me.id, created: today() };
+      const file = $('#tb-file').files[0];
+      const finish = book => { STORE.meta.templeBooks.unshift(book); save(); closeModal(); render(); toast('Obra añadida a la biblioteca del templo'); };
+      if (file) {
+        if (file.size > 1.5 * 1024 * 1024) { toast('Archivo demasiado grande (máx. 1,5 MB) — sube a Drive y pega el enlace'); return; }
+        const r = new FileReader();
+        r.onload = () => finish({ ...base, dataUrl: r.result, fileName: file.name });
+        r.readAsDataURL(file);
+      } else finish(base);
+    });
+    $('#tb-title').addEventListener('keydown', e => { if (e.key === 'Enter') $('#tb-author').focus(); });
+  });
 }
 
 function openCreateTempleModal() {
@@ -2151,11 +2231,20 @@ const ACTIONS = {
     const users = (t.data && t.data.users) || [];
     if (!confirm(`¿Demoler para siempre el templo «${t.name}» y sus ${users.length} miembro(s)? Esta acción no se puede deshacer.`)) return;
     try {
+      /* 1) intentar borrado real */
       await sbFetch(`/temples?id=eq.${t.id}`, { method: 'DELETE' });
-      toast(`Templo «${t.name}» demolido`);
+      /* 2) verificar: RLS puede bloquear el DELETE en silencio (200 sin borrar) */
+      const check = await sbFetch(`/temples?id=eq.${t.id}&select=id`);
+      if (check && check.length) {
+        /* 3) respaldo: borrado lógico — se oculta en toda la app aunque la fila persista */
+        await sbUpdateTemple(t.id, { users: [], meta: { deleted: true } });
+        toast(`Templo «${t.name}» demolido (marcado como borrado)`);
+      } else {
+        toast(`Templo «${t.name}» demolido`);
+      }
       loadTemplesDir();
     } catch {
-      toast('No se pudo borrar. ¿Ejecutaste la política de borrado en Supabase?');
+      toast('Sin conexión — no se pudo demoler el templo');
     }
   },
   'inspect-temple': d => {
@@ -2243,6 +2332,19 @@ const ACTIONS = {
     STORE.meta.libHidden[d.roman] = !STORE.meta.libHidden[d.roman];
     save(); render();
     toast(STORE.meta.libHidden[d.roman] ? `⊘ Sección ${d.roman} oculta para toda la logia` : `👁 Sección ${d.roman} visible de nuevo`);
+  },
+  'temple-book-add': () => {
+    if (rankOf(currentUser()) < 5) { toast('Reservado al V∴M∴ y al GADU'); return; }
+    openTempleBookModal();
+  },
+  'temple-book-del': d => {
+    const me = currentUser();
+    const b = STORE.meta.templeBooks.find(x => x.id === d.id); if (!b) return;
+    if (rankOf(me) < 5 && b.addedBy !== me.id) { toast('No puedes retirar esta obra'); return; }
+    if (!confirm(`¿Retirar «${b.title}» de la biblioteca del templo?`)) return;
+    STORE.meta.templeBooks = STORE.meta.templeBooks.filter(x => x.id !== d.id);
+    STORE.meta.removedDocs.push(d.id); /* lápida para la fusión */
+    save(); render(); toast('Obra retirada');
   },
   'doc-del': d => {
     const doc = STORE.meta.customDocs.find(x => x.id === d.id); if (!doc) return;

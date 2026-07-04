@@ -491,6 +491,14 @@ hr{border:none;border-top:1px solid var(--line-soft);margin:1.2rem 0}
 .lib-intro em{color:var(--ink)}
 .lib-actions{display:flex;gap:.7rem;margin-top:1.2rem;flex-wrap:wrap;align-items:center}
 .lib-progress-note{font-size:.8rem;color:var(--muted);letter-spacing:.04em}
+.lib-divider{
+  margin-top:3rem;padding-bottom:.4rem;border-bottom:1px solid var(--line);
+  display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap;
+}
+.lib-divider-mark{font-size:1.3rem;color:var(--gold);opacity:.8}
+.lib-divider-title{font-family:var(--font-display);font-weight:600;font-size:1.15rem;letter-spacing:.2em;text-transform:uppercase;color:var(--gold-hi)}
+.lib-divider-sub{font-family:var(--font-serif);font-style:italic;color:var(--muted);font-size:1rem;flex:1;min-width:180px}
+.lib-divider .btn{margin-left:auto}
 .lib-section{margin-top:2.6rem}
 .lib-sec-head{display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap}
 .lib-roman{
