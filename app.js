@@ -1512,7 +1512,8 @@ VIEWS.admin = () => {
     ${isGadu ? `
     <section class="panel">
       <div class="panel-head"><span class="panel-title">⌂ Templos del Gran Oriente (solo GADU)</span>
-        <button class="btn sm" style="margin-left:auto" data-action="reload-temples">⟳ Actualizar</button>
+        <button class="btn sm gold" style="margin-left:auto" data-action="create-temple">＋ Crear templo</button>
+        <button class="btn sm" data-action="reload-temples">⟳</button>
       </div>
       <div class="panel-body" id="temples-dir">
         <div class="empty">Consultando los templos…</div>
@@ -1572,13 +1573,94 @@ async function loadTemplesDir() {
         <span class="u-avatar">⌂</span>
         <span class="u-meta"><b>${esc(t.name)}${actual ? ' <span style="color:var(--gold)">(este templo)</span>' : ''}</b>
           <span>${users.length} miembro${users.length === 1 ? '' : 's'}${pending ? ` · ${pending} pendiente${pending === 1 ? '' : 's'}` : ''} · actividad: ${t.updated_at ? fmtShort(t.updated_at.slice(0, 10)) : '—'}</span></span>
-        <button class="btn sm" data-action="inspect-temple" data-id="${t.id}">◉ Inspeccionar</button>
+        <button class="btn sm" data-action="inspect-temple" data-id="${t.id}">◉ Ver / mover</button>
         ${actual ? '' : `<button class="btn sm gold" data-action="connect-temple" data-id="${t.id}">⌂ Conectar</button>`}
+        ${actual ? '' : `<button class="btn sm ghost" data-action="delete-temple" data-id="${t.id}">🗑 Demoler</button>`}
       </div>`;
     }).join('') || '<div class="empty">No hay templos levantados todavía.</div>';
   } catch {
     box.innerHTML = '<div class="empty">Sin conexión — no se pudo consultar el Gran Oriente.</div>';
   }
+}
+
+async function sbUpdateTemple(id, data) {
+  await sbFetch(`/temples?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ data, updated_at: new Date().toISOString() }),
+  });
+}
+
+/* mover un usuario de un templo a otro (solo GADU) */
+async function reassignUser(userId, fromId, toId) {
+  if (TEMPLE && userId === SESSION.userId && fromId === TEMPLE.id) { toast('No puedes moverte a ti mismo del templo en el que estás.'); return; }
+  try {
+    const [from] = await sbFetch(`/temples?id=eq.${fromId}&select=data`);
+    const [to] = await sbFetch(`/temples?id=eq.${toId}&select=data`);
+    const fromData = (from && from.data) || { users: [], meta: {} };
+    const toData = (to && to.data) || { users: [], meta: {} };
+    const user = (fromData.users || []).find(u => u.id === userId);
+    if (!user) { toast('El usuario ya no está en el templo de origen'); loadTemplesDir(); return; }
+    /* quitar de origen con lápida para que la fusión no lo devuelva */
+    fromData.users = (fromData.users || []).filter(u => u.id !== userId);
+    fromData.meta = fromData.meta || {};
+    fromData.meta.removedUsers = [...new Set([...(fromData.meta.removedUsers || []), userId])];
+    /* añadir al destino con revisión fresca y sin lápida */
+    user.rev = Date.now();
+    toData.users = [...(toData.users || []).filter(u => u.id !== userId), user];
+    toData.meta = toData.meta || {};
+    toData.meta.removedUsers = (toData.meta.removedUsers || []).filter(x => x !== userId);
+    await sbUpdateTemple(fromId, fromData);
+    await sbUpdateTemple(toId, toData);
+    /* reflejar en el dispositivo si el templo actual está implicado */
+    if (TEMPLE && TEMPLE.id === fromId) {
+      STORE.users = STORE.users.filter(u => u.id !== userId);
+      STORE.meta.removedUsers = [...new Set([...(STORE.meta.removedUsers || []), userId])];
+      if (SESSION.userId === userId) { SESSION.userId = null; saveSession(); }
+      localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+    }
+    if (TEMPLE && TEMPLE.id === toId) {
+      STORE.users = [...STORE.users.filter(u => u.id !== userId), user];
+      STORE.meta.removedUsers = (STORE.meta.removedUsers || []).filter(x => x !== userId);
+      localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+    }
+    toast(`${user.name} reasignado`);
+    render();
+    loadTemplesDir();
+  } catch { toast('No se pudo reasignar (sin conexión)'); }
+}
+
+function openCreateTempleModal() {
+  openModal(`
+  <div class="modal">
+    <div class="modal-head"><h3>⌂ Crear templo</h3>
+      <button class="icon-btn" data-action="close-modal">✕</button></div>
+    <div class="modal-body">
+      <p style="font-family:var(--font-serif);font-style:italic;color:var(--muted)">
+        Se levantará un templo vacío. Conéctate a él para fundar su Administrador, o reasígnale miembros existentes desde «Ver / mover».
+      </p>
+      <div class="field"><label>Nombre del templo</label><input id="ct-name" placeholder="p. ej. Aurora N° 12"></div>
+      <div class="field"><label>Código de acceso</label><input id="ct-code" placeholder="El código que darás a esa logia"></div>
+      <div class="modal-foot">
+        <button class="btn" data-action="close-modal">Cancelar</button>
+        <button class="btn gold" id="ct-save">⌂ Crear</button>
+      </div>
+    </div>
+  </div>`, () => {
+    $('#ct-save').addEventListener('click', async () => {
+      const name = $('#ct-name').value.trim();
+      const code = $('#ct-code').value.trim();
+      if (!name) { toast('El templo necesita un nombre'); return; }
+      if (code.length < 4) { toast('El código debe tener al menos 4 caracteres'); return; }
+      try {
+        await sbFetch('/temples', { method: 'POST', body: JSON.stringify({ name, code, data: { users: [], meta: {} } }) });
+        closeModal(); toast(`⌂ Templo «${name}» levantado`);
+        loadTemplesDir();
+      } catch (e) {
+        toast(e.status === 409 ? 'Ya existe un templo con ese nombre' : 'Sin conexión con el Gran Oriente');
+      }
+    });
+    $('#ct-name').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ct-code').focus(); });
+  });
 }
 
 BINDERS.admin = () => {
@@ -2058,10 +2140,29 @@ const ACTIONS = {
   },
   'leave-temple': () => leaveTemple(),
   'reload-temples': () => loadTemplesDir(),
+  'create-temple': () => {
+    if (currentUser().role !== 'gadu') { toast('Reservado al GADU'); return; }
+    openCreateTempleModal();
+  },
+  'delete-temple': async d => {
+    if (currentUser().role !== 'gadu') { toast('Reservado al GADU'); return; }
+    const t = TEMPLES_DIR.find(x => x.id === d.id); if (!t) return;
+    if (TEMPLE && t.id === TEMPLE.id) { toast('No puedes demoler el templo en el que estás. Conéctate a otro primero.'); return; }
+    const users = (t.data && t.data.users) || [];
+    if (!confirm(`¿Demoler para siempre el templo «${t.name}» y sus ${users.length} miembro(s)? Esta acción no se puede deshacer.`)) return;
+    try {
+      await sbFetch(`/temples?id=eq.${t.id}`, { method: 'DELETE' });
+      toast(`Templo «${t.name}» demolido`);
+      loadTemplesDir();
+    } catch {
+      toast('No se pudo borrar. ¿Ejecutaste la política de borrado en Supabase?');
+    }
+  },
   'inspect-temple': d => {
     if (currentUser().role !== 'gadu') { toast('Reservado al GADU'); return; }
     const t = TEMPLES_DIR.find(x => x.id === d.id); if (!t) return;
     const users = (t.data && t.data.users) || [];
+    const others = TEMPLES_DIR.filter(x => x.id !== t.id);
     openModal(`
     <div class="modal">
       <div class="modal-head"><h3>⌂ ${esc(t.name)}</h3>
@@ -2071,16 +2172,26 @@ const ACTIONS = {
           <div class="admin-row">
             <span class="u-avatar">${esc((u.name || '?').charAt(0).toUpperCase())}</span>
             <span class="u-meta"><b>${esc(u.name || '¿?')}</b>
-              <span>última actividad: ${u.lastActive ? fmtShort(u.lastActive) : '—'}</span></span>
-            <span class="u-stats">
-              <span><b>${((u.data || {}).notes || []).length}</b> notas</span>
-              <span><b>${((u.data || {}).tasks || []).filter(x => x.status !== 'done').length}</b> abiertas</span>
-            </span>
-            <span class="role-badge${u.status === 'pending' ? ' pending' : ''}">${esc(u.status === 'pending' ? 'Pendiente' : (ROLES[u.role] || ROLES.aprendiz).label)}</span>
+              <span>${esc(u.status === 'pending' ? 'Pendiente' : (ROLES[u.role] || ROLES.aprendiz).label)} · ${((u.data || {}).notes || []).length} notas · ${((u.data || {}).tasks || []).filter(x => x.status !== 'done').length} abiertas</span></span>
+            ${others.length ? `
+              <select data-move-user="${u.id}" data-from="${t.id}" title="Reasignar a otro templo">
+                <option value="">Mover a…</option>
+                ${others.map(o => `<option value="${o.id}">⌂ ${esc(o.name)}</option>`).join('')}
+              </select>` : '<span class="u-stats" style="color:var(--faint)">único templo</span>'}
           </div>`).join('') || '<div class="empty">Templo sin miembros todavía.</div>'}
         <div class="modal-foot"><button class="btn" data-action="close-modal">Cerrar</button></div>
       </div>
-    </div>`);
+    </div>`, () => {
+      $$('[data-move-user]').forEach(sel => sel.addEventListener('change', async () => {
+        const toId = sel.value; if (!toId) return;
+        const userId = sel.dataset.moveUser, fromId = sel.dataset.from;
+        const u = users.find(x => x.id === userId);
+        const dest = TEMPLES_DIR.find(x => x.id === toId);
+        if (!confirm(`¿Mover a «${u.name}» al templo «${dest.name}»?`)) { sel.value = ''; return; }
+        closeModal();
+        await reassignUser(userId, fromId, toId);
+      }));
+    });
   },
   'connect-temple': d => {
     if (currentUser().role !== 'gadu') { toast('Reservado al GADU'); return; }
@@ -2345,8 +2456,17 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 
-/* re-render al cruzar el punto de quiebre móvil/escritorio */
-window.addEventListener('resize', debounce(() => { if (currentUser()) render(); }, 250));
+/* re-render SOLO al cruzar el punto de quiebre móvil/escritorio.
+   Importante: en móvil, abrir el teclado virtual dispara resize — si
+   re-renderizáramos siempre, el campo activo se destruiría y sería
+   imposible escribir. */
+let wasMobile = isMobile();
+window.addEventListener('resize', debounce(() => {
+  const m = isMobile();
+  if (m === wasMobile) return;
+  wasMobile = m;
+  if (currentUser()) render();
+}, 250));
 
 /* sincronización con el templo: al volver a la pestaña, recuperar conexión o cada minuto */
 window.addEventListener('focus', () => { if (TEMPLE) pullTemple(); });

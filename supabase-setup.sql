@@ -27,4 +27,7 @@ drop policy if exists "gadu actualizar templos" on public.temples;
 create policy "gadu actualizar templos" on public.temples
   for update to anon using (true);
 
--- (Sin política de DELETE: nadie puede borrar un templo desde la app.)
+-- Permite al GADU demoler templos desde el panel de administración.
+drop policy if exists "gadu borrar templos" on public.temples;
+create policy "gadu borrar templos" on public.temples
+  for delete to anon using (true);
