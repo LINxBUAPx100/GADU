@@ -2553,9 +2553,21 @@ window.addEventListener('hashchange', () => {
   render();
 });
 
-/* service worker: offline + instalable (GitHub Pages sirve por HTTPS) */
+/* service worker: offline + instalable + auto-actualización.
+   Cuando se publica una versión nueva, el SW nuevo toma control y la
+   página se recarga sola una vez — sin recargas manuales del usuario. */
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
+  let swReloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (swReloading) return;
+    swReloading = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('./sw.js').then(reg => {
+    reg.update();
+    /* busca actualizaciones cada vez que se vuelve a la pestaña */
+    window.addEventListener('focus', () => reg.update());
+  }).catch(() => {});
 }
 
 /* re-render SOLO al cruzar el punto de quiebre móvil/escritorio.

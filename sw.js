@@ -1,7 +1,7 @@
 /* GADU ∴ Service Worker — funcionamiento offline en GitHub Pages */
 'use strict';
 
-const CACHE = 'gadu-v2';
+const CACHE = 'gadu-v3';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
