@@ -198,6 +198,13 @@ function updateSyncUI() {
 const touch = u => { if (u) u.rev = Date.now(); };
 const isEditingText = () => /^(input|textarea)$/i.test((document.activeElement || {}).tagName || '');
 
+/* comparación estable: jsonb de Postgres reordena las claves alfabéticamente,
+   así que comparamos con claves ordenadas para no ver "cambios" fantasma */
+const stableStr = v => JSON.stringify(v, (k, val) =>
+  (val && typeof val === 'object' && !Array.isArray(val))
+    ? Object.keys(val).sort().reduce((o, key) => { o[key] = val[key]; return o; }, {})
+    : val);
+
 function mergeUsers(localUsers, remoteUsers) {
   const map = new Map();
   (remoteUsers || []).forEach(u => map.set(u.id, u));
@@ -223,7 +230,7 @@ function mergeMeta(local, remote) {
 /* fusiona lo remoto con lo local: une usuarios por id (nunca pisa a nadie)
    y aplica las lápidas de eliminados para que no resuciten */
 function mergeIntoStore(remote) {
-  const before = JSON.stringify([STORE.users, STORE.meta]);
+  const before = stableStr([STORE.users, STORE.meta]);
   const meta = mergeMeta(STORE.meta, remote.meta);
   const deadU = new Set(meta.removedUsers);
   const deadD = new Set(meta.removedDocs);
@@ -231,7 +238,7 @@ function mergeIntoStore(remote) {
   STORE.users = mergeUsers(STORE.users, remote.users).filter(u => !deadU.has(u.id));
   STORE.meta = meta;
   ensureMeta();
-  return JSON.stringify([STORE.users, STORE.meta]) !== before;
+  return stableStr([STORE.users, STORE.meta]) !== before;
 }
 
 async function pushTemple() {
@@ -270,7 +277,7 @@ async function pullTemple(silent = true) {
         if (!silent) toast('⟳ Templo sincronizado');
       } else if (!silent) toast('⟳ Todo al día');
       /* si la fusión rescató algo que la nube no tenía, súbelo */
-      if (JSON.stringify({ users: STORE.users, meta: STORE.meta }) !== JSON.stringify(remote)) { SYNC.dirty = true; pushSoon(); }
+      if (stableStr({ users: STORE.users, meta: STORE.meta }) !== stableStr(remote)) { SYNC.dirty = true; pushSoon(); }
     }
     SYNC.offline = false;
   } catch { SYNC.offline = true; if (!silent) toast('Sin conexión — trabajando en local'); }
@@ -1504,6 +1511,15 @@ VIEWS.admin = () => {
 
     ${isGadu ? `
     <section class="panel">
+      <div class="panel-head"><span class="panel-title">⌂ Templos del Gran Oriente (solo GADU)</span>
+        <button class="btn sm" style="margin-left:auto" data-action="reload-temples">⟳ Actualizar</button>
+      </div>
+      <div class="panel-body" id="temples-dir">
+        <div class="empty">Consultando los templos…</div>
+      </div>
+    </section>
+
+    <section class="panel">
       <div class="panel-head"><span class="panel-title">▤ Biblioteca — lista blanca por rol</span></div>
       <div class="panel-body">
         <p style="font-family:var(--font-serif);font-style:italic;color:var(--muted);margin-bottom:.9rem">
@@ -1540,7 +1556,33 @@ VIEWS.admin = () => {
   </div>`;
 };
 
+/* directorio de templos (solo GADU) */
+let TEMPLES_DIR = [];
+async function loadTemplesDir() {
+  const box = $('#temples-dir');
+  if (!box) return;
+  try {
+    TEMPLES_DIR = await sbFetch('/temples?select=id,name,code,updated_at,data&order=updated_at.desc');
+    box.innerHTML = TEMPLES_DIR.map(t => {
+      const users = (t.data && t.data.users) || [];
+      const pending = users.filter(u => u.status === 'pending').length;
+      const actual = TEMPLE && t.id === TEMPLE.id;
+      return `
+      <div class="admin-row">
+        <span class="u-avatar">⌂</span>
+        <span class="u-meta"><b>${esc(t.name)}${actual ? ' <span style="color:var(--gold)">(este templo)</span>' : ''}</b>
+          <span>${users.length} miembro${users.length === 1 ? '' : 's'}${pending ? ` · ${pending} pendiente${pending === 1 ? '' : 's'}` : ''} · actividad: ${t.updated_at ? fmtShort(t.updated_at.slice(0, 10)) : '—'}</span></span>
+        <button class="btn sm" data-action="inspect-temple" data-id="${t.id}">◉ Inspeccionar</button>
+        ${actual ? '' : `<button class="btn sm gold" data-action="connect-temple" data-id="${t.id}">⌂ Conectar</button>`}
+      </div>`;
+    }).join('') || '<div class="empty">No hay templos levantados todavía.</div>';
+  } catch {
+    box.innerHTML = '<div class="empty">Sin conexión — no se pudo consultar el Gran Oriente.</div>';
+  }
+}
+
 BINDERS.admin = () => {
+  if (currentUser().role === 'gadu') loadTemplesDir();
   $$('[data-role-user]').forEach(sel => sel.addEventListener('change', () => {
     const u = getUser(sel.dataset.roleUser);
     if (!u) return;
@@ -2015,6 +2057,47 @@ const ACTIONS = {
     await pullTemple(false);
   },
   'leave-temple': () => leaveTemple(),
+  'reload-temples': () => loadTemplesDir(),
+  'inspect-temple': d => {
+    if (currentUser().role !== 'gadu') { toast('Reservado al GADU'); return; }
+    const t = TEMPLES_DIR.find(x => x.id === d.id); if (!t) return;
+    const users = (t.data && t.data.users) || [];
+    openModal(`
+    <div class="modal">
+      <div class="modal-head"><h3>⌂ ${esc(t.name)}</h3>
+        <button class="icon-btn" data-action="close-modal">✕</button></div>
+      <div class="modal-body">
+        ${users.map(u => `
+          <div class="admin-row">
+            <span class="u-avatar">${esc((u.name || '?').charAt(0).toUpperCase())}</span>
+            <span class="u-meta"><b>${esc(u.name || '¿?')}</b>
+              <span>última actividad: ${u.lastActive ? fmtShort(u.lastActive) : '—'}</span></span>
+            <span class="u-stats">
+              <span><b>${((u.data || {}).notes || []).length}</b> notas</span>
+              <span><b>${((u.data || {}).tasks || []).filter(x => x.status !== 'done').length}</b> abiertas</span>
+            </span>
+            <span class="role-badge${u.status === 'pending' ? ' pending' : ''}">${esc(u.status === 'pending' ? 'Pendiente' : (ROLES[u.role] || ROLES.aprendiz).label)}</span>
+          </div>`).join('') || '<div class="empty">Templo sin miembros todavía.</div>'}
+        <div class="modal-foot"><button class="btn" data-action="close-modal">Cerrar</button></div>
+      </div>
+    </div>`);
+  },
+  'connect-temple': d => {
+    if (currentUser().role !== 'gadu') { toast('Reservado al GADU'); return; }
+    const t = TEMPLES_DIR.find(x => x.id === d.id); if (!t) return;
+    if (!confirm(`¿Conectar este dispositivo al templo «${t.name}»? Cerrarás tu sesión actual (los datos de ambos templos siguen a salvo en la nube).`)) return;
+    TEMPLE = { id: t.id, name: t.name, code: t.code };
+    localStorage.setItem(TEMPLE_KEY, JSON.stringify(TEMPLE));
+    const remote = t.data || {};
+    STORE = { users: Array.isArray(remote.users) ? remote.users : [], meta: remote.meta || {} };
+    ensureMeta();
+    localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+    SESSION.userId = null; saveSession();
+    UI.viewAs = null; UI.view = 'dashboard';
+    AUTH.mode = 'login'; AUTH.pick = null; AUTH.error = '';
+    closeModal(); render();
+    toast(`⌂ Conectado a «${t.name}»`);
+  },
 
   /* monitoreo y encomiendas */
   'assign-work': () => openAssignModal(),
